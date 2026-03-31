@@ -175,6 +175,7 @@ class Runner:
         self.fusion_dim = all_params.get("fusion_dim", 256)
         self.long_write_cap = all_params.get("long_write_cap", 0.2)
         self.fusion_dropout = all_params.get("fusion_dropout", 0.1)
+        self.pretrained_backbone_ckpt = all_params.get("pretrained_backbone_ckpt", "")
 
         if self.use_visual_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
@@ -237,6 +238,9 @@ class Runner:
             fusion_dropout=self.fusion_dropout,
         )
         self.model.to(self.device)
+        if self.use_visual_memory and self.pretrained_backbone_ckpt:
+            self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
+
 
         if self.use_visual_memory:
             backbone_params = [p for p in self.model.backbone_parameters() if p.requires_grad]
@@ -338,6 +342,37 @@ class Runner:
         if self.use_visual_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
+
+    def _load_pretrained_backbone_if_needed(self, ckpt_path):
+        if ckpt_path is None or ckpt_path == "":
+            print("No pretrained backbone checkpoint specified.")
+            return
+
+        if not os.path.exists(ckpt_path):
+            raise FileNotFoundError(f"Pretrained checkpoint not found: {ckpt_path}")
+
+        checkpoint = torch.load(ckpt_path, map_location=self.device)
+        state_dict = checkpoint["model_state_dict"]
+
+        model_state = self.model.state_dict()
+        loaded_keys = []
+        skipped_keys = []
+
+        for k, v in state_dict.items():
+            # Only load backbone trunk. Do not load visual-memory-only params.
+            if k.startswith("conv_in.") or k.startswith("module."):
+                if k in model_state and model_state[k].shape == v.shape:
+                    model_state[k] = v
+                    loaded_keys.append(k)
+                else:
+                    skipped_keys.append(k)
+
+        self.model.load_state_dict(model_state, strict=False)
+
+        print(f"Loaded pretrained backbone from: {ckpt_path}")
+        print(f"Loaded trunk params: {len(loaded_keys)}")
+        if len(skipped_keys) > 0:
+            print(f"Skipped trunk params (shape/key mismatch): {len(skipped_keys)}")
 
     def from_framewise_to_steps(self, labels, ignore_bg=True):
         pre_label = None
