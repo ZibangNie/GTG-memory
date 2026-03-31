@@ -479,8 +479,8 @@ class Runner:
                         total_fp += tp_fp_fn[1][i]
                         total_fn += tp_fp_fn[2][i]
 
-                p = tp / float(tp + fp)
-                r = tp / float(tp + fn)
+                p = tp / float(tp + fp) if (tp + fp) > 0 else 0.0
+                r = tp / float(tp + fn) if (tp + fn) > 0 else 0.0
                 if np.isnan(p):
                     p = 0.0
                 if np.isnan(r):
@@ -518,8 +518,8 @@ class Runner:
             avg_f1_thresholds += np.array(f1_list).mean()
 
             if mode == "er":
-                total_p = total_tp / float(total_tp + total_fp)
-                total_r = total_tp / float(total_tp + total_fn)
+                total_p = total_tp / float(total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+                total_r = total_tp / float(total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
                 if np.isnan(total_p):
                     total_p = 0.0
                 if np.isnan(total_r):
