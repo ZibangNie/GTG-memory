@@ -90,3 +90,15 @@ secrets/
 *.key
 *.pem
 *.jsonl.bak
+# GTG-memory data and weights
+/ckpts/
+/runs/
+/logs/
+/data/
+/models/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.npy
+*.npz
