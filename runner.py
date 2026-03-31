@@ -353,7 +353,7 @@ class Runner:
                 pre_label = label
 
             if pre_label != label:
-                if not ignore_bg or (ignore_bg and pre_label != self.bg_idx):
+                if (not ignore_bg) or (ignore_bg and pre_label != self.bg_idx):
                     steps.append(pre_label)
                     timestamps.append([st, ed])
                 st = ed
@@ -361,9 +361,16 @@ class Runner:
 
             ed += 1
 
-        if not ignore_bg or (ignore_bg and pre_label != self.bg_idx):
-            steps.append(pre_label)
-            timestamps.append([st, ed])
+        if pre_label is not None:
+            if (not ignore_bg) or (ignore_bg and pre_label != self.bg_idx):
+                steps.append(pre_label)
+                timestamps.append([st, ed])
+
+        # Handle the edge case where all frames are background and ignore_bg=True.
+        if len(steps) == 0:
+            empty_steps = torch.empty((0,), dtype=torch.long)
+            empty_timestamps = torch.empty((0, 2), dtype=torch.float32)
+            return empty_steps, empty_timestamps
 
         return torch.cat(steps, 0).long(), torch.tensor(timestamps).float()
 
