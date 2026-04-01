@@ -1,0 +1,106 @@
+{
+    "generated_at": "20260401_130827",
+    "repo_root": "/root/autodl-tmp/GTG-memory",
+    "dataset": "EgoPER",
+    "ready_tasks": [
+        "tea",
+        "coffee"
+    ],
+    "skipped_tasks": [
+        "oatmeal",
+        "pinwheels",
+        "quesadilla"
+    ],
+    "records": {
+        "tea": {
+            "status": "ready",
+            "base_config": "/root/autodl-tmp/GTG-memory/configs/EgoPER/tea/vc_4omini_post_db0.6.json",
+            "split_checks": {
+                "train_split": {
+                    "ok": true,
+                    "message": "train_split ok"
+                },
+                "val_split": {
+                    "ok": true,
+                    "message": "val_split ok"
+                },
+                "test_split": {
+                    "ok": true,
+                    "message": "test_split ok"
+                }
+            }
+        },
+        "oatmeal": {
+            "status": "skip",
+            "base_config": "/root/autodl-tmp/GTG-memory/configs/EgoPER/oatmeal/vc_4omini_post_db0.4.json",
+            "split_checks": {
+                "train_split": {
+                    "ok": false,
+                    "message": "train_split missing file: [Errno 2] No such file or directory: '/root/autodl-tmp/data/EgoPER/oatmeal/vc_v_features_10fps/oatmeal_u2_aq_normal_001.npy'"
+                },
+                "val_split": {
+                    "ok": true,
+                    "message": "val_split ok"
+                },
+                "test_split": {
+                    "ok": true,
+                    "message": "test_split ok"
+                }
+            }
+        },
+        "pinwheels": {
+            "status": "skip",
+            "base_config": "/root/autodl-tmp/GTG-memory/configs/EgoPER/pinwheels/vc_4omini_post_db0.3.json",
+            "split_checks": {
+                "train_split": {
+                    "ok": false,
+                    "message": "train_split missing file: [Errno 2] No such file or directory: '/root/autodl-tmp/data/EgoPER/pinwheels/vc_v_features_10fps/pinwheels_u2_ak_normal_001.npy'"
+                },
+                "val_split": {
+                    "ok": true,
+                    "message": "val_split ok"
+                },
+                "test_split": {
+                    "ok": true,
+                    "message": "test_split ok"
+                }
+            }
+        },
+        "quesadilla": {
+            "status": "skip",
+            "base_config": "/root/autodl-tmp/GTG-memory/configs/EgoPER/quesadilla/vc_4omini_post_db0.2.json",
+            "split_checks": {
+                "train_split": {
+                    "ok": false,
+                    "message": "train_split missing file: [Errno 2] No such file or directory: '/root/autodl-tmp/data/EgoPER/quesadilla/vc_v_features_10fps/quesadilla_u2_aq_normal_001.npy'"
+                },
+                "val_split": {
+                    "ok": true,
+                    "message": "val_split ok"
+                },
+                "test_split": {
+                    "ok": true,
+                    "message": "test_split ok"
+                }
+            }
+        },
+        "coffee": {
+            "status": "ready",
+            "base_config": "/root/autodl-tmp/GTG-memory/configs/EgoPER/coffee/vc_4omini_post_db0.3_ndb0.json",
+            "split_checks": {
+                "train_split": {
+                    "ok": true,
+                    "message": "train_split ok"
+                },
+                "val_split": {
+                    "ok": true,
+                    "message": "val_split ok"
+                },
+                "test_split": {
+                    "ok": true,
+                    "message": "test_split ok"
+                }
+            }
+        }
+    }
+}
