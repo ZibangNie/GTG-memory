@@ -1,3 +1,17 @@
+<<<<<<< Updated upstream
+=======
+# 文件：scripts/run_available_egoper_pipeline.sh
+# 作用：
+# 1) 自动探测“当前数据可用”的 EgoPER 任务
+# 2) 只为 ready tasks 生成 config
+# 3) 只训练 ready tasks 的 baseline / visual-memory
+# 4) 对 ready tasks 做 eval
+# 5) 生成 ready tasks 的对比报告
+#
+# 一键运行：
+# bash scripts/run_available_egoper_pipeline.sh
+
+>>>>>>> Stashed changes
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -27,12 +41,16 @@ VM_LR="${VM_LR:-1e-4}"
 cd "${REPO_ROOT}"
 source env.sh
 
+<<<<<<< Updated upstream
 # 主日志：终端实时可见，同时保存到文件
+=======
+>>>>>>> Stashed changes
 exec > >(tee -a "${MASTER_LOG}") 2>&1
 
 echo "========================================"
 echo "[PIPELINE START] ${PIPELINE_TS}"
 echo "REPO_ROOT=${REPO_ROOT}"
+<<<<<<< Updated upstream
 echo "NUM_EPOCHS=${NUM_EPOCHS}"
 echo "NUM_ITERATIONS=${NUM_ITERATIONS}"
 echo "BATCH_SIZE=${BATCH_SIZE}"
@@ -54,6 +72,21 @@ echo
 echo "[STEP 1/6] Build available-only splits + configs"
 python scripts/build_available_only_egoper_splits_and_configs.py \
   --repo_root "${REPO_ROOT}" \
+=======
+echo "========================================"
+
+echo
+echo "[STEP 1/6] Probe available EgoPER tasks"
+python scripts/probe_available_egoper_tasks.py --repo_root "${REPO_ROOT}"
+
+TASK_JSON="${REPO_ROOT}/reports/task_probe/egoper_ready_tasks_latest.json"
+
+echo
+echo "[STEP 2/6] Generate configs only for ready tasks"
+python scripts/gen_all_egoper_task_configs.py \
+  --repo_root "${REPO_ROOT}" \
+  --task_list_json "${TASK_JSON}" \
+>>>>>>> Stashed changes
   --num_epochs "${NUM_EPOCHS}" \
   --num_iterations "${NUM_ITERATIONS}" \
   --batch_size "${BATCH_SIZE}" \
@@ -69,6 +102,7 @@ python scripts/build_available_only_egoper_splits_and_configs.py \
   --backbone_learning_rate "${BACKBONE_LR}" \
   --vm_learning_rate "${VM_LR}"
 
+<<<<<<< Updated upstream
 TASK_JSON="${REPO_ROOT}/reports/task_probe/egoper_available_only_latest.json"
 
 if [[ ! -f "${TASK_JSON}" ]]; then
@@ -209,6 +243,65 @@ done
 
 echo
 echo "[STEP 6/6] Generate comparison report for available-only ready tasks"
+=======
+echo
+echo "[STEP 3/6] Train baseline on ready tasks"
+python - <<'PY'
+import json
+from pathlib import Path
+task_json = Path("/root/autodl-tmp/GTG-memory/reports/task_probe/egoper_ready_tasks_latest.json")
+payload = json.loads(task_json.read_text())
+for t in payload["ready_tasks"]:
+    print(t)
+PY
+READY_TASKS=$(python - <<'PY'
+import json
+from pathlib import Path
+task_json = Path("/root/autodl-tmp/GTG-memory/reports/task_probe/egoper_ready_tasks_latest.json")
+payload = json.loads(task_json.read_text())
+print(" ".join(payload["ready_tasks"]))
+PY
+)
+
+for task in ${READY_TASKS}; do
+  CFG="configs/EgoPER/${task}/generated/vc_4omini_post_db0.6.baseline.train.json"
+  echo "[BASELINE][START] ${task}"
+  python main.py --config "${CFG}" --dir baseline_retrain
+  echo "[BASELINE][DONE] ${task}"
+done
+
+echo
+echo "[STEP 4/6] Train visual-memory on ready tasks"
+for task in ${READY_TASKS}; do
+  CFG="configs/EgoPER/${task}/generated/vc_4omini_post_db0.6.visual_memory.train.json"
+  echo "[VM][START] ${task}"
+  python main.py --config "${CFG}" --dir vm_warmstart
+  echo "[VM][DONE] ${task}"
+done
+
+echo
+echo "[STEP 5/6] Eval latest baseline / vm on ready tasks"
+for task in ${READY_TASKS}; do
+  BASE_DIR=$(ls -dt ckpts/EgoPER/${task}/baseline_retrain_* | head -n 1)
+  VM_DIR=$(ls -dt ckpts/EgoPER/${task}/vm_warmstart_* | head -n 1)
+
+  BASE_NAME=$(basename "${BASE_DIR}")
+  VM_NAME=$(basename "${VM_DIR}")
+
+  python main.py \
+    --config "configs/EgoPER/${task}/generated/vc_4omini_post_db0.6.baseline.train.json" \
+    --dir "${BASE_NAME}" \
+    --eval
+
+  python main.py \
+    --config "configs/EgoPER/${task}/generated/vc_4omini_post_db0.6.visual_memory.train.json" \
+    --dir "${VM_NAME}" \
+    --eval
+done
+
+echo
+echo "[STEP 6/6] Generate comparison report for ready tasks only"
+>>>>>>> Stashed changes
 python scripts/compare_egoper_runs.py \
   --repo_root "${REPO_ROOT}" \
   --baseline_tag baseline_retrain \
