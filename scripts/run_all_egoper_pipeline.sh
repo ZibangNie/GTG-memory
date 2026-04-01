@@ -1,20 +1,3 @@
-# 文件 2：scripts/run_all_egoper_pipeline.sh
-# 作用：
-# 1) 生成全部任务 config
-# 2) 跑全部 baseline_retrain
-# 3) 跑全部 vm_warmstart
-# 4) 对两者分别做 latest eval
-# 5) 自动生成对比报告
-#
-# 一键运行方式：
-#   bash scripts/run_all_egoper_pipeline.sh
-#
-# 可调环境变量（可选）：
-#   NUM_EPOCHS=10 NUM_ITERATIONS=100 BATCH_SIZE=2 LOG_FREQ=10 bash scripts/run_all_egoper_pipeline.sh
-
-cd /root/autodl-tmp/GTG-memory
-
-cat > scripts/run_all_egoper_pipeline.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -106,6 +89,3 @@ bash scripts/show_latest_result_paths.sh
 
 echo
 echo "[PIPELINE DONE] log=${MASTER_LOG}"
-SH
-
-chmod +x scripts/run_all_egoper_pipeline.sh

@@ -1,24 +1,7 @@
-# 文件 1：scripts/compare_egoper_runs.py
+# 文件：scripts/compare_egoper_runs.py
 # 作用：
-# 1) 自动找到每个任务最新的 baseline_retrain_* 和 vm_warmstart_* 结果目录
-# 2) 读取三份日志：
-#    - action_segmentation.txt
-#    - error_detection.txt
-#    - error_recognition.txt
-# 3) 解析关键指标
-# 4) 生成 Markdown / CSV / JSON 三种报告
-#
-# 生成位置：
-#   reports/compare_runs/<timestamp>/
-#
-# 用法：
-#   python scripts/compare_egoper_runs.py
-#   python scripts/compare_egoper_runs.py --repo_root /root/autodl-tmp/GTG-memory
-#   python scripts/compare_egoper_runs.py --baseline_tag baseline_retrain --vm_tag vm_warmstart
+# 只比较 ready_tasks 里的任务，并生成 Markdown / CSV / JSON 报告
 
-cd /root/autodl-tmp/GTG-memory
-
-cat > scripts/compare_egoper_runs.py <<'PY'
 import argparse
 import csv
 import json
@@ -27,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from statistics import mean
 
-TASKS = ["tea", "oatmeal", "pinwheels", "quesadilla", "coffee"]
+DEFAULT_TASKS = ["tea", "oatmeal", "pinwheels", "quesadilla", "coffee"]
 
 METRIC_SPECS = [
     ("tas_f1_050", "TAS F1@0.500"),
@@ -42,6 +25,10 @@ METRIC_SPECS = [
     ("er_eacc_050", "ER EAcc@0.500"),
 ]
 
+def load_json(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
 def read_text(path: Path) -> str:
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
@@ -52,17 +39,9 @@ def parse_first_float(pattern: str, text: str):
     return float(m.group(1)) if m else None
 
 def parse_table_value_pair(text: str, header_key: str):
-    """
-    解析 error_recognition.txt 里类似：
-    | All Precision |  All Recall   |    All F1     |All w-F1@0.000 |     EAcc      |
-    |     15.6      |     44.0      |     23.1      |     23.1      |     100.0     |
-
-    返回 (w_f1, eacc)
-    """
     lines = text.splitlines()
     for i, line in enumerate(lines):
         if header_key in line:
-            # 找下一行真正的数值行
             for j in range(i + 1, min(i + 5, len(lines))):
                 candidate = lines[j].strip()
                 if candidate.startswith("|"):
@@ -153,20 +132,19 @@ def write_csv(path: Path, rows):
 def write_json(path: Path, payload):
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
-def write_markdown(path: Path, rows, base_dirs, vm_dirs, summary):
+def write_markdown(path: Path, rows, base_dirs, vm_dirs, summary, tasks):
     lines = []
-    lines.append("# EgoPER Baseline vs Visual-Memory Comparison Report\n")
-    lines.append("\n")
+    lines.append("# EgoPER Baseline vs Visual-Memory Comparison Report\n\n")
     lines.append(f"- Generated at: {summary['generated_at']}\n")
     lines.append(f"- Repo root: `{summary['repo_root']}`\n")
     lines.append(f"- Baseline tag: `{summary['baseline_tag']}`\n")
     lines.append(f"- Visual-memory tag: `{summary['vm_tag']}`\n")
-    lines.append("\n")
+    lines.append(f"- Tasks: `{tasks}`\n\n")
 
     lines.append("## Run directories\n\n")
     lines.append("| Task | Baseline dir | Visual-memory dir |\n")
     lines.append("|---|---|---|\n")
-    for task in TASKS:
+    for task in tasks:
         lines.append(f"| {task} | `{base_dirs.get(task, '-')}` | `{vm_dirs.get(task, '-')}` |\n")
     lines.append("\n")
 
@@ -204,11 +182,17 @@ def main():
     parser.add_argument("--repo_root", type=str, default="/root/autodl-tmp/GTG-memory")
     parser.add_argument("--baseline_tag", type=str, default="baseline_retrain")
     parser.add_argument("--vm_tag", type=str, default="vm_warmstart")
+    parser.add_argument("--task_list_json", type=str, default="")
     parser.add_argument("--output_root", type=str, default="")
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if args.task_list_json:
+        tasks = load_json(Path(args.task_list_json))["ready_tasks"]
+    else:
+        tasks = DEFAULT_TASKS
 
     if args.output_root:
         output_root = Path(args.output_root)
@@ -220,7 +204,7 @@ def main():
     base_dirs = {}
     vm_dirs = {}
 
-    for task in TASKS:
+    for task in tasks:
         base_dir = latest_run_dir(repo_root, task, args.baseline_tag)
         vm_dir = latest_run_dir(repo_root, task, args.vm_tag)
 
@@ -246,6 +230,7 @@ def main():
         "repo_root": str(repo_root),
         "baseline_tag": args.baseline_tag,
         "vm_tag": args.vm_tag,
+        "tasks": tasks,
         "avg": avg_summary,
         "rows": rows,
         "baseline_dirs": base_dirs,
@@ -256,7 +241,7 @@ def main():
     csv_path = output_root / "comparison_summary.csv"
     json_path = output_root / "comparison_summary.json"
 
-    write_markdown(md_path, rows, base_dirs, vm_dirs, summary)
+    write_markdown(md_path, rows, base_dirs, vm_dirs, summary, tasks)
     write_csv(csv_path, rows)
     write_json(json_path, summary)
 
@@ -266,4 +251,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-PY
