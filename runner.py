@@ -497,8 +497,9 @@ class Runner:
         """
         Compute scalar memory diagnostics from forward_with_aux() outputs.
 
-        base / short / long raw dimensions are not identical, so cosine
-        similarities are computed in the shared fusion space.
+        Supports both:
+        - VisualMemoryScorer
+        - VisualSemanticMemoryScorer
         """
         if (not (self.use_visual_memory or self.use_semantic_memory)) or ("base_seq" not in aux):
             return {}
@@ -507,39 +508,102 @@ class Runner:
 
         with torch.no_grad():
             base_seq = aux["base_seq"].detach()
-            short_seq = aux["short_memory_seq"].detach()
-            long_seq = aux["long_memory_seq"].detach()
-            gate_seq = aux["long_write_gate_seq"].detach()
             fused_seq = aux["fused_seq"].detach()
 
+            logs = {}
+
+            # shared quantities
             base_proj = scorer.base_fuse_proj(base_seq)
-            short_proj = scorer.short_fuse_proj(short_seq)
-            long_proj = scorer.long_fuse_proj(long_seq)
-
-            near_cap_threshold = max(self.long_write_cap - 0.02, 0.0)
-
-            # fusion_ratio = ||f_t|| / ||h_base|| where fused = LN(base + delta)
-            # approximate delta in fusion space using projected base
             fusion_delta = fused_seq - base_proj
             fusion_ratio = (
                 fusion_delta.norm(dim=-1).mean() / (base_proj.norm(dim=-1).mean() + 1e-8)
             ).item()
+            logs["MEM/fusion_ratio"] = fusion_ratio
 
-            logs = {
-                "MEM/short_norm": short_seq.norm(dim=-1).mean().item(),
-                "MEM/long_norm": long_seq.norm(dim=-1).mean().item(),
-                "MEM/delta_short": self._temporal_delta_mean(short_seq),
-                "MEM/delta_long": self._temporal_delta_mean(long_seq),
-                "MEM/gate_mean": gate_seq.mean().item(),
-                "MEM/gate_near_zero_ratio": (gate_seq < 0.02).float().mean().item(),
-                "MEM/gate_near_cap_ratio": (gate_seq > near_cap_threshold).float().mean().item(),
-                "MEM/fusion_ratio": fusion_ratio,
-                "MEM/cos_base_short": F.cosine_similarity(base_proj, short_proj, dim=-1).mean().item(),
-                "MEM/cos_base_long": F.cosine_similarity(base_proj, long_proj, dim=-1).mean().item(),
-                "MEM/cos_short_long": F.cosine_similarity(short_proj, long_proj, dim=-1).mean().item(),
-            }
+            # ---------- visual-memory-only style logs ----------
+            if "short_memory_seq" in aux and "long_memory_seq" in aux and "long_write_gate_seq" in aux:
+                short_seq = aux["short_memory_seq"].detach()
+                long_seq = aux["long_memory_seq"].detach()
+                gate_seq = aux["long_write_gate_seq"].detach()
 
-        return logs
+                logs["MEM/short_norm"] = short_seq.norm(dim=-1).mean().item()
+                logs["MEM/long_norm"] = long_seq.norm(dim=-1).mean().item()
+                logs["MEM/delta_short"] = self._temporal_delta_mean(short_seq)
+                logs["MEM/delta_long"] = self._temporal_delta_mean(long_seq)
+                logs["MEM/gate_mean"] = gate_seq.mean().item()
+
+                near_cap_threshold = max(getattr(self, "long_write_cap", 0.2) - 0.02, 0.0)
+                logs["MEM/gate_near_zero_ratio"] = (gate_seq < 0.02).float().mean().item()
+                logs["MEM/gate_near_cap_ratio"] = (gate_seq > near_cap_threshold).float().mean().item()
+
+                # old visual scorer has explicit short/long fuse projectors
+                if hasattr(scorer, "short_fuse_proj") and hasattr(scorer, "long_fuse_proj"):
+                    short_proj = scorer.short_fuse_proj(short_seq)
+                    long_proj = scorer.long_fuse_proj(long_seq)
+                    logs["MEM/cos_base_short"] = F.cosine_similarity(base_proj, short_proj, dim=-1).mean().item()
+                    logs["MEM/cos_base_long"] = F.cosine_similarity(base_proj, long_proj, dim=-1).mean().item()
+                    logs["MEM/cos_short_long"] = F.cosine_similarity(short_proj, long_proj, dim=-1).mean().item()
+
+            # ---------- semantic-memory-specific logs ----------
+            if self.use_semantic_memory:
+                if "sem_short_seq" in aux:
+                    sem_short_seq = aux["sem_short_seq"].detach()
+                    logs["SEM/short_norm"] = sem_short_seq.norm(dim=-1).mean().item()
+                    logs["SEM/delta_short"] = self._temporal_delta_mean(sem_short_seq)
+
+                if "sem_long_seq" in aux:
+                    sem_long_seq = aux["sem_long_seq"].detach()
+                    logs["SEM/long_norm"] = sem_long_seq.norm(dim=-1).mean().item()
+                    logs["SEM/delta_long"] = self._temporal_delta_mean(sem_long_seq)
+
+                if "sem_long_gate_seq" in aux:
+                    sem_long_gate_seq = aux["sem_long_gate_seq"].detach()
+                    logs["SEM/gate_mean"] = sem_long_gate_seq.mean().item()
+
+                    near_cap_threshold = max(getattr(self, "semantic_long_write_cap", 0.2) - 0.02, 0.0)
+                    logs["SEM/gate_near_zero_ratio"] = (sem_long_gate_seq < 0.02).float().mean().item()
+                    logs["SEM/gate_near_cap_ratio"] = (sem_long_gate_seq > near_cap_threshold).float().mean().item()
+
+                if "coverage_trace_seq" in aux:
+                    coverage_seq = aux["coverage_trace_seq"].detach()
+                    logs["SEM/coverage_mean"] = coverage_seq.mean().item()
+                    logs["SEM/coverage_peak"] = coverage_seq.max(dim=-1).values.mean().item()
+
+                if "uncertainty_trace_seq" in aux:
+                    uncertainty_seq = aux["uncertainty_trace_seq"].detach()
+                    logs["SEM/uncertainty_mean"] = uncertainty_seq.mean().item()
+                    logs["SEM/uncertainty_norm"] = uncertainty_seq.norm(dim=-1).mean().item()
+
+                if "semantic_fuse_gate_seq" in aux:
+                    fuse_gate_seq = aux["semantic_fuse_gate_seq"].detach()
+                    logs["SEM/fuse_gate_mean"] = fuse_gate_seq.mean().item()
+                    logs["SEM/fuse_gate_low_ratio"] = (fuse_gate_seq < 0.2).float().mean().item()
+                    logs["SEM/fuse_gate_high_ratio"] = (fuse_gate_seq > 0.8).float().mean().item()
+
+                if "proto_gate" in aux:
+                    proto_gate = aux["proto_gate"].detach()
+                    logs["SEM/proto_gate_mean"] = proto_gate.mean().item()
+                    logs["SEM/proto_gate_low_ratio"] = (proto_gate < 0.2).float().mean().item()
+                    logs["SEM/proto_gate_high_ratio"] = (proto_gate > 0.8).float().mean().item()
+
+                if "step_posteriors" in aux:
+                    alpha = aux["step_posteriors"].detach()
+                    alpha_entropy = -(alpha.clamp_min(1e-8) * alpha.clamp_min(1e-8).log()).sum(dim=-1)
+                    logs["SEM/alpha_entropy"] = alpha_entropy.mean().item()
+                    logs["SEM/alpha_max"] = alpha.max(dim=-1).values.mean().item()
+
+                if "error_posteriors" in aux:
+                    gamma = aux["error_posteriors"].detach()
+                    error_mass = gamma.sum(dim=(-1, -2))
+                    logs["SEM/error_mass_mean"] = error_mass.mean().item()
+
+                if "main_logits" in aux and "final_logits" in aux:
+                    main_logits = aux["main_logits"].detach()
+                    final_logits = aux["final_logits"].detach()
+                    proto_boost = final_logits - main_logits
+                    logs["SEM/proto_boost_abs_mean"] = proto_boost.abs().mean().item()
+
+            return logs
 
     def _flush_memory_logs(self, mem_log_buffer, global_step):
         if self.writer is None or len(mem_log_buffer) == 0:
