@@ -1,0 +1,37 @@
+|       Action       |Precision@0.000| Recall@0.000  | F1@0.000 |
+|       Normal       |     68.0      |     37.8      |   48.6   |
+|       Error        |     63.6      |     35.0      |   45.2   |
+
+
+Avg F1@0.000: 46.9
+
+|       Action       |Precision@0.010| Recall@0.010  | F1@0.010 |
+|       Normal       |     68.0      |     37.0      |   47.9   |
+|       Error        |     54.5      |     30.8      |   39.3   |
+
+
+Avg F1@0.010: 43.6
+
+|       Action       |Precision@0.100| Recall@0.100  | F1@0.100 |
+|       Normal       |     64.0      |     34.8      |   45.1   |
+|       Error        |     45.5      |     25.6      |   32.8   |
+
+
+Avg F1@0.100: 38.9
+
+|       Action       |Precision@0.250| Recall@0.250  | F1@0.250 |
+|       Normal       |     52.0      |     28.3      |   36.6   |
+|       Error        |     40.9      |     23.1      |   29.5   |
+
+
+Avg F1@0.250: 33.1
+
+|       Action       |Precision@0.500| Recall@0.500  | F1@0.500 |
+|       Normal       |     24.0      |     13.0      |   16.9   |
+|       Error        |     27.3      |     15.4      |   19.7   |
+
+
+Avg F1@0.500: 18.3
+
+
+
