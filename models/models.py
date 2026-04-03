@@ -35,6 +35,9 @@ class ASDiffusionBackbone(nn.Module):
         topo_lambda_succ=0.8,
         topo_lambda_pred=0.4,
         topo_lambda_total=0.5,
+        semantic_fuse_scale=0.5,
+        semantic_proto_boost_scale=0.35,
+        semantic_error_suppress_scale=0.6,
     ):
         super(ASDiffusionBackbone, self).__init__()
 
@@ -89,6 +92,9 @@ class ASDiffusionBackbone(nn.Module):
                 lambda_succ=topo_lambda_succ,
                 lambda_pred=topo_lambda_pred,
                 lambda_topo=topo_lambda_total,
+                semantic_fuse_scale=semantic_fuse_scale,
+                semantic_proto_boost_scale=semantic_proto_boost_scale,
+                semantic_error_suppress_scale=semantic_error_suppress_scale,
             )
             for p in self.action_head.parameters():
                 p.requires_grad = False

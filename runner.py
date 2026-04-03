@@ -273,6 +273,9 @@ class Runner:
             fusion_dim=self.fusion_dim,
             long_write_cap=self.long_write_cap,
             fusion_dropout=self.fusion_dropout,
+            semantic_fuse_scale=self.semantic_fuse_scale,
+            semantic_proto_boost_scale=self.semantic_proto_boost_scale,
+            semantic_error_suppress_scale=self.semantic_error_suppress_scale,
         )
         self.model.to(self.device)
 
@@ -602,6 +605,11 @@ class Runner:
                     final_logits = aux["final_logits"].detach()
                     proto_boost = final_logits - main_logits
                     logs["SEM/proto_boost_abs_mean"] = proto_boost.abs().mean().item()
+
+                if "error_suppress_seq" in aux:
+                    es = aux["error_suppress_seq"].detach()
+                    logs["SEM/error_suppress_mean"] = es.mean().item()
+                    logs["SEM/error_suppress_high_ratio"] = (es > 0.5).float().mean().item()
 
             return logs
 

@@ -29,6 +29,9 @@ class VisualSemanticMemoryScorer(nn.Module):
         lambda_succ: float = 0.8,
         lambda_pred: float = 0.4,
         lambda_topo: float = 0.5,
+        semantic_fuse_scale: float = 0.5,
+        semantic_proto_boost_scale: float = 0.35,
+        semantic_error_suppress_scale: float = 0.6,
     ):
         super().__init__()
         self.feature_dim = feature_dim
@@ -99,7 +102,7 @@ class VisualSemanticMemoryScorer(nn.Module):
         self.base_fuse_proj = LinearNormGELU(fusion_dim, fusion_dim)
         self.semantic_fuse_gate = nn.Linear(fusion_dim * 4, fusion_dim)  # channel-wise
         self.joint_fusion = nn.Sequential(
-            nn.Linear(fusion_dim * 3, 512),
+            nn.Linear(fusion_dim * 4, 512),
             nn.LayerNorm(512),
             nn.GELU(),
             nn.Dropout(fusion_dropout),
@@ -121,6 +124,17 @@ class VisualSemanticMemoryScorer(nn.Module):
             nn.Linear(256, proto_steps),
         )
         nn.init.constant_(self.proto_gate[-1].bias, -2.0)
+
+        self.semantic_fuse_scale = semantic_fuse_scale
+        self.semantic_proto_boost_scale = semantic_proto_boost_scale
+        self.semantic_error_suppress_scale = semantic_error_suppress_scale
+
+        self.error_suppressor = nn.Sequential(
+            nn.Linear(8, 64),
+            nn.LayerNorm(64),
+            nn.GELU(),
+            nn.Linear(64, 1),
+        )
 
     def configure_prototypes(
         self,
@@ -205,15 +219,23 @@ class VisualSemanticMemoryScorer(nn.Module):
         base_fused = self.base_fuse_proj(base_seq)
         visual_ctx = visual_dict["visual_ctx_seq"]
 
-        fuse_gate = torch.sigmoid(
+        fuse_gate_raw = torch.sigmoid(
             self.semantic_fuse_gate(
                 torch.cat([base_fused, visual_ctx, semantic_ctx_seq, aux_emb], dim=-1)
             )
-        )  # [B, T, fusion_dim]
+        )
+        fuse_gate = self.semantic_fuse_scale * fuse_gate_raw
 
         gated_semantic_ctx = fuse_gate * semantic_ctx_seq
-        fusion_delta = self.joint_fusion(torch.cat([base_fused, visual_ctx, gated_semantic_ctx], dim=-1))
-        joint_fused = self.joint_norm(base_fused + fusion_delta)  # [B, T, fusion_dim]
+
+        error_suppress = self.semantic_error_suppress_scale * torch.sigmoid(
+            self.error_suppressor(sem_obs["aux_stats_seq"])
+        )  # [B, T, 1]
+
+        fusion_delta = self.joint_fusion(
+            torch.cat([base_fused, visual_ctx, gated_semantic_ctx, aux_emb], dim=-1)
+        )
+        joint_fused = self.joint_norm(base_fused + fusion_delta)
 
         # main head
         frame_features = joint_fused.transpose(1, 2)  # [B, fusion_dim, T]
@@ -233,7 +255,12 @@ class VisualSemanticMemoryScorer(nn.Module):
         )  # [B, T, S]
 
         final_logits = main_logits.clone()
-        step_boost = proto_gate * proto_logits_steps  # [B, T, S]
+        step_boost = (
+                self.semantic_proto_boost_scale
+                * (1.0 - error_suppress)
+                * proto_gate
+                * proto_logits_steps
+        )
         step_node_ids = self.prototype_bank.step_node_ids.to(frame_seq.device)
 
         for step_idx, node_id in enumerate(step_node_ids.tolist()):
@@ -257,6 +284,7 @@ class VisualSemanticMemoryScorer(nn.Module):
             "proto_gate": proto_gate,
             "final_logits": final_logits,
             "fused_seq": joint_fused,
+            "error_suppress_seq": error_suppress,
         }
         return final_logits, frame_features, aux
 
