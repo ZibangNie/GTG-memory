@@ -85,7 +85,7 @@ secrets/
 *.pem
 *.jsonl.bak
 # GTG-memory data and weights
-/ckpts/
+
 
 
 /data/
