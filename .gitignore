@@ -43,7 +43,7 @@ processed_data/
 # Models / weights
 weights/
 checkpoints/
-ckpts/
+
 pretrained/
 *.pt
 *.pth
