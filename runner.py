@@ -200,6 +200,10 @@ class Runner:
         self.semantic_proto_boost_scale = all_params.get("semantic_proto_boost_scale", 0.35)
         self.semantic_error_suppress_scale = all_params.get("semantic_error_suppress_scale", 0.6)
 
+        self.semantic_fuse_scale = all_params.get("semantic_fuse_scale", 0.5)
+        self.semantic_proto_boost_scale = all_params.get("semantic_proto_boost_scale", 0.35)
+        self.semantic_error_suppress_scale = all_params.get("semantic_error_suppress_scale", 0.6)
+
         self.semantic_proto_payload = None
         self.short_dim = all_params.get("short_dim", 256)
         self.long_dim = all_params.get("long_dim", 384)
