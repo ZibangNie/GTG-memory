@@ -196,6 +196,10 @@ class Runner:
         self.semantic_error_feature_dir = all_params.get("semantic_error_feature_dir", all_params.get("simple_error_path", "vc_chatgpt4omini_error_features"))
         self.semantic_feature_dim = all_params.get("semantic_feature_dim", self.input_dim)
 
+        self.semantic_fuse_scale = all_params.get("semantic_fuse_scale", 0.5)
+        self.semantic_proto_boost_scale = all_params.get("semantic_proto_boost_scale", 0.35)
+        self.semantic_error_suppress_scale = all_params.get("semantic_error_suppress_scale", 0.6)
+
         self.semantic_proto_payload = None
         self.short_dim = all_params.get("short_dim", 256)
         self.long_dim = all_params.get("long_dim", 384)
