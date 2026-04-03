@@ -19,6 +19,7 @@ import networkx as nx
 from networkx.algorithms.dag import lexicographical_topological_sort
 
 from models.models import ASDiffusionBackbone
+from utils.semantic_prototype_loader import load_task_semantic_prototypes
 
 from datasets.gtg_dataset_loader import get_data_dict, VideoDataset
 
@@ -154,6 +155,10 @@ class Runner:
         dataset_name = all_params["dataset_name"]
         input_dim = all_params["input_dim"]
 
+        self.root_data_dir = root_data_dir
+        self.input_dim = input_dim
+        self.simple_error_path = all_params.get("simple_error_path", "vc_chatgpt4omini_error_features")
+
         self.naming = all_params["naming"]
         self.lr = all_params["learning_rate"]
         self.weight_decay = all_params["weight_decay"]
@@ -170,6 +175,28 @@ class Runner:
 
         # visual-memory config
         self.use_visual_memory = all_params.get("use_visual_memory", False)
+        self.use_semantic_memory = all_params.get("use_semantic_memory", False)
+
+        self.semantic_short_dim = all_params.get("semantic_short_dim", 256)
+        self.semantic_long_dim = all_params.get("semantic_long_dim", 384)
+        self.semantic_uncertainty_dim = all_params.get("semantic_uncertainty_dim", 32)
+        self.semantic_long_write_cap = all_params.get("semantic_long_write_cap", 0.2)
+
+        self.semantic_tau_step = all_params.get("semantic_tau_step", 0.07)
+        self.semantic_tau_err = all_params.get("semantic_tau_err", 0.07)
+        self.semantic_rho_err = all_params.get("semantic_rho_err", 0.85)
+        self.semantic_error_candidate_max_k = all_params.get("semantic_error_candidate_max_k", 5)
+
+        self.semantic_topo_lambda_self = all_params.get("semantic_topo_lambda_self", 1.0)
+        self.semantic_topo_lambda_succ = all_params.get("semantic_topo_lambda_succ", 0.8)
+        self.semantic_topo_lambda_pred = all_params.get("semantic_topo_lambda_pred", 0.4)
+        self.semantic_topo_lambda_total = all_params.get("semantic_topo_lambda_total", 0.5)
+
+        self.semantic_feature_dir = all_params.get("semantic_feature_dir", "vc_normal_action_features")
+        self.semantic_error_feature_dir = all_params.get("semantic_error_feature_dir", all_params.get("simple_error_path", "vc_chatgpt4omini_error_features"))
+        self.semantic_feature_dim = all_params.get("semantic_feature_dim", self.input_dim)
+
+        self.semantic_proto_payload = None
         self.short_dim = all_params.get("short_dim", 256)
         self.long_dim = all_params.get("long_dim", 384)
         self.fusion_dim = all_params.get("fusion_dim", 256)
@@ -177,7 +204,7 @@ class Runner:
         self.fusion_dropout = all_params.get("fusion_dropout", 0.1)
         self.pretrained_backbone_ckpt = all_params.get("pretrained_backbone_ckpt", "")
 
-        if self.use_visual_memory:
+        if self.use_visual_memory or self.use_semantic_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
             self.vm_lr = all_params.get("vm_learning_rate", 1e-4)
         else:
@@ -231,6 +258,16 @@ class Runner:
             device=self.device,
             bg_w=all_params["background_weight"],
             use_visual_memory=self.use_visual_memory,
+            use_semantic_memory=self.use_semantic_memory,
+            uncertainty_dim=self.semantic_uncertainty_dim,
+            tau_step=self.semantic_tau_step,
+            tau_err=self.semantic_tau_err,
+            rho_err=self.semantic_rho_err,
+            error_candidate_max_k=self.semantic_error_candidate_max_k,
+            topo_lambda_self=self.semantic_topo_lambda_self,
+            topo_lambda_succ=self.semantic_topo_lambda_succ,
+            topo_lambda_pred=self.semantic_topo_lambda_pred,
+            topo_lambda_total=self.semantic_topo_lambda_total,
             short_dim=self.short_dim,
             long_dim=self.long_dim,
             fusion_dim=self.fusion_dim,
@@ -238,11 +275,35 @@ class Runner:
             fusion_dropout=self.fusion_dropout,
         )
         self.model.to(self.device)
-        if self.use_visual_memory and self.pretrained_backbone_ckpt:
+
+        if self.use_semantic_memory:
+            self.semantic_proto_payload = load_task_semantic_prototypes(
+                root_data_dir=self.root_data_dir,
+                dataset_name=self.dataset_name,
+                feature_dim=self.semantic_feature_dim,
+                normal_dir_name=self.semantic_feature_dir,
+                error_dir_name=self.semantic_error_feature_dir,
+            )
+
+            self.model.configure_semantic_prototypes(
+                step_prototypes=self.semantic_proto_payload["step_prototypes"].to(self.device),
+                error_prototypes=self.semantic_proto_payload["error_prototypes"].to(self.device),
+                step_node_ids=self.semantic_proto_payload["step_node_ids"],
+                predecessor_edges=self.semantic_proto_payload["predecessor_edges"],
+            )
+
+            print("[semantic] task_dir:", self.semantic_proto_payload["task_dir"])
+            print("[semantic] normal_dir:", self.semantic_proto_payload["normal_dir"])
+            print("[semantic] error_dir:", self.semantic_proto_payload["error_dir"])
+            print("[semantic] step_prototypes:", tuple(self.semantic_proto_payload["step_prototypes"].shape))
+            print("[semantic] error_prototypes:", tuple(self.semantic_proto_payload["error_prototypes"].shape))
+            print("[semantic] num_error_types:", self.semantic_proto_payload["num_error_types"])
+            print("[semantic] missing_error_pairs:", len(self.semantic_proto_payload["missing_error_pairs"]))
+        if (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
             self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
 
 
-        if self.use_visual_memory:
+        if self.use_visual_memory or self.use_semantic_memory:
             backbone_params = [p for p in self.model.backbone_parameters() if p.requires_grad]
             vm_params = [p for p in self.model.visual_memory_parameters() if p.requires_grad]
 
@@ -339,7 +400,8 @@ class Runner:
                 self.ignore_actions.append(self.idx2actiontype[str(action_type)])
 
         print("Use visual memory:", self.use_visual_memory)
-        if self.use_visual_memory:
+        print("Use semantic memory:", self.use_semantic_memory)
+        if self.use_visual_memory or self.use_semantic_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
 
@@ -438,7 +500,7 @@ class Runner:
         base / short / long raw dimensions are not identical, so cosine
         similarities are computed in the shared fusion space.
         """
-        if (not self.use_visual_memory) or ("base_seq" not in aux):
+        if (not (self.use_visual_memory or self.use_semantic_memory)) or ("base_seq" not in aux):
             return {}
 
         scorer = self.model.visual_memory_scorer
@@ -629,7 +691,7 @@ class Runner:
                 label = label.squeeze(0).long().cpu()
                 type_label = type_label.squeeze(0).long().cpu()
 
-                if self.use_visual_memory:
+                if self.use_visual_memory or self.use_semantic_memory:
                     action_logits, frame_features, aux = self.model.forward_with_aux(feature.permute(0, 2, 1), label)
                     mem_log_buffer.append(self._compute_memory_log_dict(aux))
                 else:
@@ -670,7 +732,7 @@ class Runner:
                     samples = []
                     global_step += 1
 
-                    if self.use_visual_memory:
+                    if self.use_visual_memory or self.use_semantic_memory:
                         self._flush_memory_logs(mem_log_buffer, global_step)
                         mem_log_buffer = []
 
