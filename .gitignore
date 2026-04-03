@@ -62,12 +62,7 @@ pretrained/
 *.hdf5
 
 # Experiment outputs
-runs/
-outputs/
-results/
-wandb/
-tensorboard/
-events.out.tfevents.*
+
 
 # Archives
 *.zip
@@ -92,10 +87,10 @@ secrets/
 *.jsonl.bak
 # GTG-memory data and weights
 /ckpts/
-/runs/
-/logs/
+
+
 /data/
-/models/
+
 *.pth
 *.pt
 *.ckpt
