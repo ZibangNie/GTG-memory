@@ -46,8 +46,8 @@ checkpoints/
 
 pretrained/
 *.pt
-*.pth
-*.ckpt
+
+
 *.bin
 *.safetensors
 *.onnx
@@ -90,9 +90,3 @@ secrets/
 
 /data/
 
-*.pth
-*.pt
-*.ckpt
-*.safetensors
-*.npy
-*.npz
