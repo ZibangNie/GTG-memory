@@ -830,6 +830,126 @@ class Runner:
         }
         return erm_inputs
 
+    def _compute_erm_log_dict(self, erm_aux):
+        """
+        Compute scalar ERM-v2 diagnostics from SoftCandidateERM forward_with_aux() outputs.
+        """
+        if erm_aux is None:
+            return {}
+
+        logs = {}
+
+        with torch.no_grad():
+            candidate_count = torch.as_tensor(erm_aux["candidate_count_seq"]).float()   # [T]
+            err_mask = candidate_count > 0
+
+            if err_mask.sum().item() == 0:
+                return {}
+
+            candidate_weights = torch.as_tensor(erm_aux["candidate_weights_seq"]).float()   # [T, K]
+            candidate_flags = torch.as_tensor(erm_aux["candidate_flags_seq"]).long()        # [T, K]
+            anchor_fallback = torch.as_tensor(erm_aux["anchor_fallback_seq"]).float()       # [T]
+            q_component_norms = torch.as_tensor(erm_aux["q_component_norms"]).float()       # [T, 6]
+            joint_scores = torch.as_tensor(erm_aux["joint_scores_seq"]).float()             # [T, K, M]
+            aggregated_scores = torch.as_tensor(erm_aux["aggregated_scores_seq"]).float()   # [T, C]
+            smoothed_scores = torch.as_tensor(erm_aux["smoothed_scores_seq"]).float()       # [T, C]
+
+            valid_counts = candidate_count[err_mask]
+            logs["ERM/cand_size_mean"] = valid_counts.mean().item()
+            logs["ERM/cand_size_std"] = (
+                valid_counts.std(unbiased=False).item() if valid_counts.numel() > 1 else 0.0
+            )
+
+            anchor_mask = (candidate_flags & 1) > 0
+            semantic_mask = (candidate_flags & 2) > 0
+            topo_mask = (candidate_flags & 4) > 0
+
+            anchor_weight = (candidate_weights * anchor_mask.float()).sum(dim=-1)
+            logs["ERM/anchor_weight_mean"] = anchor_weight[err_mask].mean().item()
+
+            top1_idx = candidate_weights.argmax(dim=-1, keepdim=True)
+            anchor_is_top1 = anchor_mask.gather(dim=1, index=top1_idx).squeeze(1).float()
+            logs["ERM/anchor_is_top1_ratio"] = anchor_is_top1[err_mask].mean().item()
+
+            has_topo_neighbor = topo_mask.any(dim=-1).float()
+            logs["ERM/topo_neighbor_in_cand_ratio"] = has_topo_neighbor[err_mask].mean().item()
+
+            has_semantic_candidate = semantic_mask.any(dim=-1).float()
+            logs["ERM/semantic_candidate_present_ratio"] = has_semantic_candidate[err_mask].mean().item()
+
+            # candidate entropy over K
+            cand_entropy = -(
+                candidate_weights.clamp_min(1e-8) * candidate_weights.clamp_min(1e-8).log()
+            ).sum(dim=-1)
+            logs["ERM/cand_entropy_mean"] = cand_entropy[err_mask].mean().item()
+
+            logs["ERM/fallback_ratio"] = anchor_fallback[err_mask].mean().item()
+
+            # q_component_norms = [q_frame, q_vis, q_sem, q_obs, q_final, sem_conf]
+            logs["ERM/q_frame_contrib_norm"] = q_component_norms[err_mask, 0].mean().item()
+            logs["ERM/q_vis_contrib_norm"] = q_component_norms[err_mask, 1].mean().item()
+            logs["ERM/q_sem_contrib_norm"] = q_component_norms[err_mask, 2].mean().item()
+            logs["ERM/q_obs_contrib_norm"] = q_component_norms[err_mask, 3].mean().item()
+            logs["ERM/q_norm"] = q_component_norms[err_mask, 4].mean().item()
+            logs["ERM/sem_conf_mean"] = q_component_norms[err_mask, 5].mean().item()
+
+            logs["ERM/joint_score_mean"] = joint_scores[err_mask].mean().item()
+            logs["ERM/joint_score_std"] = joint_scores[err_mask].std(unbiased=False).item()
+
+            # use non-normal columns only
+            err_scores_before = aggregated_scores[err_mask, 1:]
+            err_scores_after = smoothed_scores[err_mask, 1:]
+
+            if err_scores_before.numel() > 0:
+                logs["ERM/agg_score_before_smooth_mean"] = err_scores_before.mean().item()
+                logs["ERM/agg_score_after_smooth_mean"] = err_scores_after.mean().item()
+
+                top2 = torch.topk(
+                    err_scores_after,
+                    k=min(2, err_scores_after.shape[-1]),
+                    dim=-1,
+                ).values
+                if top2.shape[-1] == 2:
+                    margin = top2[:, 0] - top2[:, 1]
+                else:
+                    margin = top2[:, 0]
+                logs["ERM/top1_top2_margin_mean"] = margin.mean().item()
+
+                pred_dist = torch.softmax(err_scores_after, dim=-1)
+                pred_entropy = -(
+                    pred_dist.clamp_min(1e-8) * pred_dist.clamp_min(1e-8).log()
+                ).sum(dim=-1)
+                logs["ERM/pred_error_type_entropy"] = pred_entropy.mean().item()
+
+                smooth_change = (err_scores_after - err_scores_before).abs().sum(dim=-1)
+                logs["ERM/smooth_change_ratio"] = (smooth_change > 1e-6).float().mean().item()
+
+        return logs
+
+    def _dump_erm_debug_json(self, video_id, erm_aux):
+        """
+        Save per-video ERM-v2 debug tensors for offline inspection.
+        """
+        if erm_aux is None:
+            return
+        if not self.use_new_erm:
+            return
+
+        out_dir = os.path.join(self.save_dir, "output", "erm_debug")
+        os.makedirs(out_dir, exist_ok=True)
+
+        payload = {}
+        for k, v in erm_aux.items():
+            if isinstance(v, torch.Tensor):
+                payload[k] = v.detach().cpu().tolist()
+            elif isinstance(v, np.ndarray):
+                payload[k] = v.tolist()
+            else:
+                payload[k] = v
+
+        with open(os.path.join(out_dir, f"{video_id}.json"), "w") as fp:
+            json.dump(payload, fp)
+
     def train(self):
         global_step = 0
         best_score = 0.0
@@ -931,6 +1051,7 @@ class Runner:
                 acc_list = []
                 tpr_list = []
                 fpr_list = []
+                erm_log_buffer = []
 
                 for video_idx, data in enumerate(loader):
                     v_feature, label, type_label, video = data
@@ -1007,6 +1128,15 @@ class Runner:
                             feature.permute(0, 2, 1).cpu().squeeze(0),
                         )
                         erm_aux = None
+
+                    if self.use_new_erm and erm_aux is not None:
+                        erm_log_dict = self._compute_erm_log_dict(erm_aux)
+                        if len(erm_log_dict) > 0:
+                            erm_log_buffer.append(erm_log_dict)
+
+                        # dump per-video debug only when vis is enabled
+                        if self.is_vis:
+                            self._dump_erm_debug_json(video, erm_aux)
 
                     # let error as an additional class
                     label_w_error_cls = label.clone()
@@ -1122,6 +1252,13 @@ class Runner:
                     self.writer.add_scalar("ED_F1@0.500/valid", ed_out["F1@0.500"] * 100, global_step)
                     self.writer.add_scalar("AVG_ER_F1/valid", er_avg_f1, global_step)
                     self.writer.add_scalar("AVG_ED_F1/valid", ed_avg_f1, global_step)
+
+                    if self.use_new_erm and len(erm_log_buffer) > 0:
+                        keys = erm_log_buffer[0].keys()
+                        for k in keys:
+                            mean_v = float(np.mean([item[k] for item in erm_log_buffer]))
+                            self.writer.add_scalar(k, mean_v, global_step)
+
                     if self.is_vis:
                         grid = create_image_grid(os.path.join(self.save_dir, vis_dir))
                         self.writer.add_image("Images/valid", grid, global_step)
