@@ -195,10 +195,15 @@ class Runner:
         self.semantic_topo_lambda_total = all_params.get("semantic_topo_lambda_total", 0.5)
 
         self.semantic_feature_dir = all_params.get("semantic_feature_dir", "vc_normal_action_features")
-        self.semantic_error_feature_dir = all_params.get("semantic_error_feature_dir", all_params.get("simple_error_path", "vc_chatgpt4omini_error_features"))
+        self.semantic_error_feature_dir = all_params.get(
+            "semantic_error_feature_dir",
+            all_params.get("simple_error_path", "vc_chatgpt4omini_error_features"),
+        )
         self.semantic_feature_dim = all_params.get("semantic_feature_dim", self.input_dim)
 
         self.semantic_proto_payload = None
+        self.erm_module = None
+
         self.short_dim = all_params.get("short_dim", 256)
         self.long_dim = all_params.get("long_dim", 384)
         self.fusion_dim = all_params.get("fusion_dim", 256)
@@ -311,14 +316,7 @@ class Runner:
                 predecessor_edges=self.semantic_proto_payload["predecessor_edges"],
             )
 
-            self.erm_module = None
             if self.use_new_erm:
-                if not self.use_semantic_memory:
-                    raise ValueError("use_new_erm=True requires use_semantic_memory=True")
-
-                if self.semantic_proto_payload is None:
-                    raise RuntimeError("semantic prototypes must be loaded before initializing ERM v2")
-
                 self.erm_module = SoftCandidateERM(
                     bg_idx=self.bg_idx,
                     addition_idx=self.addition_idx,
@@ -347,13 +345,12 @@ class Runner:
             print("[semantic] error_prototypes:", tuple(self.semantic_proto_payload["error_prototypes"].shape))
             print("[semantic] num_error_types:", self.semantic_proto_payload["num_error_types"])
             print("[semantic] missing_error_pairs:", len(self.semantic_proto_payload["missing_error_pairs"]))
-            print("Use new ERM:", self.use_new_erm)
 
-
+        if self.use_new_erm and not self.use_semantic_memory:
+            raise ValueError("use_new_erm=True requires use_semantic_memory=True")
 
         if (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
             self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
-
 
         if self.use_visual_memory or self.use_semantic_memory:
             backbone_params = [p for p in self.model.backbone_parameters() if p.requires_grad]
@@ -453,6 +450,7 @@ class Runner:
 
         print("Use visual memory:", self.use_visual_memory)
         print("Use semantic memory:", self.use_semantic_memory)
+        print("Use new ERM:", self.use_new_erm)
         if self.use_visual_memory or self.use_semantic_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
