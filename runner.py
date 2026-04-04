@@ -349,7 +349,7 @@ class Runner:
         if self.use_new_erm and not self.use_semantic_memory:
             raise ValueError("use_new_erm=True requires use_semantic_memory=True")
 
-        if (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
+        if (not args.eval) and (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
             self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
 
         if self.use_visual_memory or self.use_semantic_memory:
