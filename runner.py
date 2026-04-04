@@ -872,8 +872,15 @@ class Runner:
             anchor_fallback = torch.as_tensor(erm_aux["anchor_fallback_seq"]).float()       # [T]
             q_component_norms = torch.as_tensor(erm_aux["q_component_norms"]).float()       # [T, 6]
             joint_scores = torch.as_tensor(erm_aux["joint_scores_seq"]).float()             # [T, K, M]
-            aggregated_scores = torch.as_tensor(erm_aux["aggregated_scores_seq"]).float()   # [T, C]
-            smoothed_scores = torch.as_tensor(erm_aux["smoothed_scores_seq"]).float()       # [T, C]
+            aggregated_scores = torch.as_tensor(erm_aux["aggregated_scores_seq"]).float()
+            smoothed_scores = torch.as_tensor(erm_aux["smoothed_scores_seq"]).float()
+
+            # make sure both are [T, C]
+            if aggregated_scores.ndim == 2 and aggregated_scores.shape[0] != candidate_count.shape[0]:
+                aggregated_scores = aggregated_scores.transpose(0, 1)
+
+            if smoothed_scores.ndim == 2 and smoothed_scores.shape[0] != candidate_count.shape[0]:
+                smoothed_scores = smoothed_scores.transpose(0, 1)
 
             valid_counts = candidate_count[err_mask]
             logs["ERM/cand_size_mean"] = valid_counts.mean().item()

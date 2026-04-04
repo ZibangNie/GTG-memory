@@ -435,7 +435,7 @@ class SoftCandidateERM(nn.Module):
             "q_component_norms": q_component_norms.detach().cpu(),
             "joint_scores_seq": joint_scores_seq.detach().cpu(),
             "aggregated_scores_seq": aggregated_scores_seq.detach().cpu(),
-            "smoothed_scores_seq": smoothed_scores.detach().cpu(),
+            "smoothed_scores_seq": smoothed_scores.transpose(0, 1).detach().cpu(),
             "type_ids": self.type_ids.detach().cpu(),
             "step_node_ids": self.step_node_ids.detach().cpu(),
         }
