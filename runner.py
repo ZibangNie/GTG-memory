@@ -369,11 +369,32 @@ class Runner:
         dataset_dict = get_datasets(all_params, self.num_classes, self.action2idx, self.actiontype2idx, args.eval)
 
         if args.eval:
-            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
-            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False, num_workers=1)
-            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False, num_workers=1)
-            self.load_dir = os.path.join(self.ckpt_dir, self.naming, dataset_name, args.dir, "best_checkpoint.pth")
-            self.save_dir = os.path.join(self.ckpt_dir, self.naming, dataset_name, args.dir)
+            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False,
+                                                           num_workers=1)
+            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False,
+                                                          num_workers=1)
+            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False,
+                                                            num_workers=1)
+
+            load_dir_name = args.load_dir if args.load_dir is not None else args.dir
+            save_dir_name = args.save_dir if args.save_dir is not None else load_dir_name
+
+            self.load_dir = os.path.join(
+                self.ckpt_dir,
+                self.naming,
+                dataset_name,
+                load_dir_name,
+                "best_checkpoint.pth",
+            )
+
+            self.save_dir = os.path.join(
+                self.ckpt_dir,
+                self.naming,
+                dataset_name,
+                save_dir_name,
+            )
+            os.makedirs(self.save_dir, exist_ok=True)
+
             self.writer = None
         else:
             self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
