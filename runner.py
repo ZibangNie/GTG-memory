@@ -28,6 +28,8 @@ from utils.utils import draw_pred, create_image_grid
 
 from dp.graph_utils import compute_generalized_metadag_costs, generalized_metadag2vid
 
+from src.erm import SoftCandidateERM
+
 np.random.seed(0)
 random.seed(0)
 torch.manual_seed(0)
@@ -204,6 +206,23 @@ class Runner:
         self.fusion_dropout = all_params.get("fusion_dropout", 0.1)
         self.pretrained_backbone_ckpt = all_params.get("pretrained_backbone_ckpt", "")
 
+        # ERM v2 config
+        self.use_new_erm = all_params.get("use_new_erm", False)
+        self.erm_rho = all_params.get("erm_rho", 0.85)
+        self.erm_kmax_sem = all_params.get("erm_kmax_sem", 5)
+        self.erm_kmax_final = all_params.get("erm_kmax_final", 6)
+
+        self.erm_lambda_anchor = all_params.get("erm_lambda_anchor", 0.8)
+        self.erm_lambda_nb = all_params.get("erm_lambda_nb", 0.3)
+        self.erm_lambda_cov = all_params.get("erm_lambda_cov", 0.2)
+
+        self.erm_lambda_vis = all_params.get("erm_lambda_vis", 0.5)
+        self.erm_lambda_sem = all_params.get("erm_lambda_sem", 0.7)
+        self.erm_lambda_obs = all_params.get("erm_lambda_obs", 0.3)
+
+        self.erm_similarity_scale = all_params.get("erm_similarity_scale", 20.0)
+        self.erm_smooth_window = all_params.get("erm_smooth_window", 5)
+
         if self.use_visual_memory or self.use_semantic_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
             self.vm_lr = all_params.get("vm_learning_rate", 1e-4)
@@ -292,6 +311,35 @@ class Runner:
                 predecessor_edges=self.semantic_proto_payload["predecessor_edges"],
             )
 
+            self.erm_module = None
+            if self.use_new_erm:
+                if not self.use_semantic_memory:
+                    raise ValueError("use_new_erm=True requires use_semantic_memory=True")
+
+                if self.semantic_proto_payload is None:
+                    raise RuntimeError("semantic prototypes must be loaded before initializing ERM v2")
+
+                self.erm_module = SoftCandidateERM(
+                    bg_idx=self.bg_idx,
+                    addition_idx=self.addition_idx,
+                    num_types=self.num_types,
+                    step_prototypes=self.semantic_proto_payload["step_prototypes"],
+                    error_prototypes=self.semantic_proto_payload["error_prototypes"],
+                    step_node_ids=self.semantic_proto_payload["step_node_ids"],
+                    type_ids=self.semantic_proto_payload["type_ids"],
+                    rho=self.erm_rho,
+                    kmax_sem=self.erm_kmax_sem,
+                    kmax_final=self.erm_kmax_final,
+                    lambda_anchor=self.erm_lambda_anchor,
+                    lambda_nb=self.erm_lambda_nb,
+                    lambda_cov=self.erm_lambda_cov,
+                    lambda_vis=self.erm_lambda_vis,
+                    lambda_sem=self.erm_lambda_sem,
+                    lambda_obs=self.erm_lambda_obs,
+                    similarity_scale=self.erm_similarity_scale,
+                    smooth_window=self.erm_smooth_window,
+                ).to(self.device)
+
             print("[semantic] task_dir:", self.semantic_proto_payload["task_dir"])
             print("[semantic] normal_dir:", self.semantic_proto_payload["normal_dir"])
             print("[semantic] error_dir:", self.semantic_proto_payload["error_dir"])
@@ -299,6 +347,10 @@ class Runner:
             print("[semantic] error_prototypes:", tuple(self.semantic_proto_payload["error_prototypes"].shape))
             print("[semantic] num_error_types:", self.semantic_proto_payload["num_error_types"])
             print("[semantic] missing_error_pairs:", len(self.semantic_proto_payload["missing_error_pairs"]))
+            print("Use new ERM:", self.use_new_erm)
+
+
+
         if (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
             self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
 
@@ -740,6 +792,46 @@ class Runner:
 
         return pred, type_pred, error_pred
 
+    def _build_new_erm_inputs(
+        self,
+        pred,
+        no_drop_pred_raw,
+        no_drop_meta,
+        frame_features,
+        aux,
+        video_id,
+    ):
+        if aux is None:
+            raise RuntimeError("ERM v2 requires forward_with_aux outputs")
+
+        if "step_posteriors" not in aux:
+            raise RuntimeError("ERM v2 requires semantic aux: step_posteriors")
+
+        semantic_obs_seq = aux.get("semantic_obs_seq", None)
+        if semantic_obs_seq is None and ("step_sem_obs" in aux) and ("error_sem_obs" in aux):
+            semantic_obs_seq = 0.5 * (aux["step_sem_obs"] + aux["error_sem_obs"])
+
+        def _squeeze_or_none(x):
+            if x is None:
+                return None
+            return x.squeeze(0)
+
+        erm_inputs = {
+            "pred": pred,
+            "no_drop_pred": no_drop_pred_raw,
+            "no_drop_meta": no_drop_meta,
+            "frame_features": frame_features.squeeze(0).permute(1, 0),  # [T, D]
+            "vis_short_seq": _squeeze_or_none(aux.get("short_memory_seq", None)),
+            "sem_short_seq": _squeeze_or_none(aux.get("sem_short_seq", None)),
+            "semantic_obs_seq": _squeeze_or_none(semantic_obs_seq),
+            "step_posteriors": _squeeze_or_none(aux.get("step_posteriors", None)),
+            "coverage_trace_seq": _squeeze_or_none(aux.get("coverage_trace_seq", None)),
+            "uncertainty_trace_seq": _squeeze_or_none(aux.get("uncertainty_trace_seq", None)),
+            "graph": self.G.graph_info["graph"],
+            "video_id": video_id,
+        }
+        return erm_inputs
+
     def train(self):
         global_step = 0
         best_score = 0.0
@@ -847,7 +939,13 @@ class Runner:
                     video = video[0]
                     feature = v_feature.to(self.device)
 
-                    action_logits, frame_features = self.model(feature.permute(0, 2, 1))
+                    if self.use_visual_memory or self.use_semantic_memory:
+                        action_logits, frame_features, aux = self.model.forward_with_aux(
+                            feature.permute(0, 2, 1)
+                        )
+                    else:
+                        action_logits, frame_features = self.model(feature.permute(0, 2, 1))
+                        aux = None
 
                     label = label.squeeze(0)
                     type_label = type_label.squeeze(0)
@@ -882,21 +980,35 @@ class Runner:
                     zx_costs, drop_costs, node_drop_costs = compute_generalized_metadag_costs(
                         sample, idx2node, -100, -200
                     )
-                    _, no_drop_pred, _ = generalized_metadag2vid(
+                    _, no_drop_pred_raw, _, no_drop_meta = generalized_metadag2vid(
                         zx_costs.cpu().numpy(),
                         drop_costs.cpu().numpy(),
                         node_drop_costs.cpu().numpy(),
                         gmetadag,
                         idx2node,
+                        return_meta_labels=True,
                     )
 
+                    no_drop_pred = np.copy(no_drop_pred_raw)
                     no_drop_pred[no_drop_pred >= self.num_classes] = self.bg_idx
 
-                    pred, type_pred, error_pred = self.erm(
-                        pred,
-                        no_drop_pred,
-                        feature.permute(0, 2, 1).cpu().squeeze(0),
-                    )
+                    if self.use_new_erm:
+                        erm_inputs = self._build_new_erm_inputs(
+                            pred=pred,
+                            no_drop_pred_raw=no_drop_pred_raw,
+                            no_drop_meta=no_drop_meta,
+                            frame_features=frame_features,
+                            aux=aux,
+                            video_id=video,
+                        )
+                        pred, type_pred, error_pred, erm_aux = self.erm_module.forward_with_aux(erm_inputs)
+                    else:
+                        pred, type_pred, error_pred = self.erm(
+                            pred,
+                            no_drop_pred,
+                            feature.permute(0, 2, 1).cpu().squeeze(0),
+                        )
+                        erm_aux = None
 
                     # let error as an additional class
                     label_w_error_cls = label.clone()
