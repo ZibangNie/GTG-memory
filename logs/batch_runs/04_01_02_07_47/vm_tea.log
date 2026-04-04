@@ -1,0 +1,133 @@
+Loaded pretrained backbone from: ckpts/EgoPER/tea/best/best_checkpoint.pth
+Loaded trunk params: 100
+Loading Dataset ...
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 548.46it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 554.70it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 547.44it/s]
+Use visual memory: True
+Backbone LR: 5e-05, VM LR: 0.0001
+Ignore specific or non-exsting action type for error recognition: ['Normal']
+Epoch: [1/10], Iter: [10/100] action_ce_loss:1.532	
+Epoch: [1/10], Iter: [20/100] action_ce_loss:0.618	
+Epoch: [1/10], Iter: [30/100] action_ce_loss:0.303	
+Epoch: [1/10], Iter: [40/100] action_ce_loss:0.198	
+Epoch: [1/10], Iter: [50/100] action_ce_loss:0.156	
+Epoch: [1/10], Iter: [60/100] action_ce_loss:0.122	
+Epoch: [1/10], Iter: [70/100] action_ce_loss:0.115	
+Epoch: [1/10], Iter: [80/100] action_ce_loss:0.098	
+Epoch: [1/10], Iter: [90/100] action_ce_loss:0.088	
+Epoch: [1/10], Iter: [100/100] action_ce_loss:0.088	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Save best weight at epoch: 1
+Epoch: [2/10], Iter: [10/100] action_ce_loss:0.083	
+Epoch: [2/10], Iter: [20/100] action_ce_loss:0.063	
+Epoch: [2/10], Iter: [30/100] action_ce_loss:0.076	
+Epoch: [2/10], Iter: [40/100] action_ce_loss:0.070	
+Epoch: [2/10], Iter: [50/100] action_ce_loss:0.068	
+Epoch: [2/10], Iter: [60/100] action_ce_loss:0.067	
+Epoch: [2/10], Iter: [70/100] action_ce_loss:0.067	
+Epoch: [2/10], Iter: [80/100] action_ce_loss:0.052	
+Epoch: [2/10], Iter: [90/100] action_ce_loss:0.056	
+Epoch: [2/10], Iter: [100/100] action_ce_loss:0.051	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Save best weight at epoch: 2
+Epoch: [3/10], Iter: [10/100] action_ce_loss:0.049	
+Epoch: [3/10], Iter: [20/100] action_ce_loss:0.054	
+Epoch: [3/10], Iter: [30/100] action_ce_loss:0.057	
+Epoch: [3/10], Iter: [40/100] action_ce_loss:0.051	
+Epoch: [3/10], Iter: [50/100] action_ce_loss:0.046	
+Epoch: [3/10], Iter: [60/100] action_ce_loss:0.051	
+Epoch: [3/10], Iter: [70/100] action_ce_loss:0.056	
+Epoch: [3/10], Iter: [80/100] action_ce_loss:0.045	
+Epoch: [3/10], Iter: [90/100] action_ce_loss:0.051	
+Epoch: [3/10], Iter: [100/100] action_ce_loss:0.043	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [4/10], Iter: [10/100] action_ce_loss:0.047	
+Epoch: [4/10], Iter: [20/100] action_ce_loss:0.047	
+Epoch: [4/10], Iter: [30/100] action_ce_loss:0.053	
+Epoch: [4/10], Iter: [40/100] action_ce_loss:0.049	
+Epoch: [4/10], Iter: [50/100] action_ce_loss:0.054	
+Epoch: [4/10], Iter: [60/100] action_ce_loss:0.048	
+Epoch: [4/10], Iter: [70/100] action_ce_loss:0.041	
+Epoch: [4/10], Iter: [80/100] action_ce_loss:0.043	
+Epoch: [4/10], Iter: [90/100] action_ce_loss:0.046	
+Epoch: [4/10], Iter: [100/100] action_ce_loss:0.042	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [5/10], Iter: [10/100] action_ce_loss:0.044	
+Epoch: [5/10], Iter: [20/100] action_ce_loss:0.051	
+Epoch: [5/10], Iter: [30/100] action_ce_loss:0.039	
+Epoch: [5/10], Iter: [40/100] action_ce_loss:0.050	
+Epoch: [5/10], Iter: [50/100] action_ce_loss:0.039	
+Epoch: [5/10], Iter: [60/100] action_ce_loss:0.034	
+Epoch: [5/10], Iter: [70/100] action_ce_loss:0.048	
+Epoch: [5/10], Iter: [80/100] action_ce_loss:0.043	
+Epoch: [5/10], Iter: [90/100] action_ce_loss:0.044	
+Epoch: [5/10], Iter: [100/100] action_ce_loss:0.044	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [6/10], Iter: [10/100] action_ce_loss:0.044	
+Epoch: [6/10], Iter: [20/100] action_ce_loss:0.038	
+Epoch: [6/10], Iter: [30/100] action_ce_loss:0.049	
+Epoch: [6/10], Iter: [40/100] action_ce_loss:0.045	
+Epoch: [6/10], Iter: [50/100] action_ce_loss:0.042	
+Epoch: [6/10], Iter: [60/100] action_ce_loss:0.045	
+Epoch: [6/10], Iter: [70/100] action_ce_loss:0.039	
+Epoch: [6/10], Iter: [80/100] action_ce_loss:0.046	
+Epoch: [6/10], Iter: [90/100] action_ce_loss:0.042	
+Epoch: [6/10], Iter: [100/100] action_ce_loss:0.045	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [7/10], Iter: [10/100] action_ce_loss:0.052	
+Epoch: [7/10], Iter: [20/100] action_ce_loss:0.042	
+Epoch: [7/10], Iter: [30/100] action_ce_loss:0.048	
+Epoch: [7/10], Iter: [40/100] action_ce_loss:0.046	
+Epoch: [7/10], Iter: [50/100] action_ce_loss:0.037	
+Epoch: [7/10], Iter: [60/100] action_ce_loss:0.050	
+Epoch: [7/10], Iter: [70/100] action_ce_loss:0.042	
+Epoch: [7/10], Iter: [80/100] action_ce_loss:0.039	
+Epoch: [7/10], Iter: [90/100] action_ce_loss:0.041	
+Epoch: [7/10], Iter: [100/100] action_ce_loss:0.042	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [8/10], Iter: [10/100] action_ce_loss:0.036	
+Epoch: [8/10], Iter: [20/100] action_ce_loss:0.037	
+Epoch: [8/10], Iter: [30/100] action_ce_loss:0.038	
+Epoch: [8/10], Iter: [40/100] action_ce_loss:0.040	
+Epoch: [8/10], Iter: [50/100] action_ce_loss:0.037	
+Epoch: [8/10], Iter: [60/100] action_ce_loss:0.042	
+Epoch: [8/10], Iter: [70/100] action_ce_loss:0.037	
+Epoch: [8/10], Iter: [80/100] action_ce_loss:0.039	
+Epoch: [8/10], Iter: [90/100] action_ce_loss:0.036	
+Epoch: [8/10], Iter: [100/100] action_ce_loss:0.040	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [9/10], Iter: [10/100] action_ce_loss:0.035	
+Epoch: [9/10], Iter: [20/100] action_ce_loss:0.035	
+Epoch: [9/10], Iter: [30/100] action_ce_loss:0.046	
+Epoch: [9/10], Iter: [40/100] action_ce_loss:0.039	
+Epoch: [9/10], Iter: [50/100] action_ce_loss:0.037	
+Epoch: [9/10], Iter: [60/100] action_ce_loss:0.045	
+Epoch: [9/10], Iter: [70/100] action_ce_loss:0.037	
+Epoch: [9/10], Iter: [80/100] action_ce_loss:0.040	
+Epoch: [9/10], Iter: [90/100] action_ce_loss:0.034	
+Epoch: [9/10], Iter: [100/100] action_ce_loss:0.042	
+Num of valid omitted sequences: 32
+Evalutation Done...
+Epoch: [10/10], Iter: [10/100] action_ce_loss:0.042	
+Epoch: [10/10], Iter: [20/100] action_ce_loss:0.041	
+Epoch: [10/10], Iter: [30/100] action_ce_loss:0.036	
+Epoch: [10/10], Iter: [40/100] action_ce_loss:0.043	
+Epoch: [10/10], Iter: [50/100] action_ce_loss:0.041	
+Epoch: [10/10], Iter: [60/100] action_ce_loss:0.033	
+Epoch: [10/10], Iter: [70/100] action_ce_loss:0.036	
+Epoch: [10/10], Iter: [80/100] action_ce_loss:0.042	
+Epoch: [10/10], Iter: [90/100] action_ce_loss:0.032	
+Epoch: [10/10], Iter: [100/100] action_ce_loss:0.036	
+Num of valid omitted sequences: 32
+Evalutation Done...
