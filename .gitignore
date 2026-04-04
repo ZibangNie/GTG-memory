@@ -25,8 +25,7 @@ conda-meta/
 Thumbs.db
 
 # Logs
-logs/
-*.log
+
 
 # Temporary / cache
 tmp/
@@ -44,7 +43,7 @@ processed_data/
 # Models / weights
 weights/
 checkpoints/
-ckpts/
+
 pretrained/
 *.pt
 *.pth
@@ -62,12 +61,7 @@ pretrained/
 *.hdf5
 
 # Experiment outputs
-runs/
-outputs/
-results/
-wandb/
-tensorboard/
-events.out.tfevents.*
+
 
 # Archives
 *.zip
@@ -91,11 +85,11 @@ secrets/
 *.pem
 *.jsonl.bak
 # GTG-memory data and weights
-/ckpts/
-/runs/
-/logs/
+
+
+
 /data/
-/models/
+
 *.pth
 *.pt
 *.ckpt

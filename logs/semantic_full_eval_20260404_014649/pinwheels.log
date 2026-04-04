@@ -1,0 +1,23 @@
+[semantic] task_dir: /root/autodl-tmp/data/EgoPER/pinwheels
+[semantic] normal_dir: /root/autodl-tmp/data/EgoPER/pinwheels/vc_normal_action_features
+[semantic] error_dir: /root/autodl-tmp/data/EgoPER/pinwheels/vc_chatgpt4omini_error_features
+[semantic] step_prototypes: (13, 256)
+[semantic] error_prototypes: (13, 3, 256)
+[semantic] num_error_types: 3
+[semantic] missing_error_pairs: 0
+Loaded pretrained backbone from: ckpts/EgoPER/pinwheels/best/best_checkpoint.pth
+Loaded trunk params: 100
+Loading Dataset ...
+  0%|          | 0/36 [00:00<?, ?it/s] 72%|███████▏  | 26/36 [00:00<00:00, 296.15it/s]
+Traceback (most recent call last):
+  File "/root/autodl-tmp/GTG-memory/main.py", line 24, in <module>
+    run = Runner(args)
+  File "/root/autodl-tmp/GTG-memory/runner.py", line 320, in __init__
+    dataset_dict = get_datasets(all_params, self.num_classes, self.action2idx, self.actiontype2idx, args.eval)
+  File "/root/autodl-tmp/GTG-memory/runner.py", line 114, in get_datasets
+    train_data_dict = get_data_dict(
+  File "/root/autodl-tmp/GTG-memory/datasets/gtg_dataset_loader.py", line 61, in get_data_dict
+    v_feature = np.load(v_feature_file)
+  File "/root/autodl-tmp/envs/GTG/lib/python3.10/site-packages/numpy/lib/_npyio_impl.py", line 451, in load
+    fid = stack.enter_context(open(os.fspath(file), "rb"))
+FileNotFoundError: [Errno 2] No such file or directory: '/root/autodl-tmp/data/EgoPER/pinwheels/vc_v_features_10fps/pinwheels_u2_ak_normal_001.npy'

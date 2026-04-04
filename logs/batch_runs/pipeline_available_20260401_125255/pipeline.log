@@ -1,0 +1,75 @@
+========================================
+[PIPELINE START] 20260401_125255
+REPO_ROOT=/root/autodl-tmp/GTG-memory
+========================================
+
+[STEP 1/6] Probe available EgoPER tasks
+Loading Dataset ...
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 266.63it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 497.15it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 418.38it/s]
+[READY] tea -> vc_4omini_post_db0.6.json
+Loading Dataset ...
+  0%|          | 0/39 [00:00<?, ?it/s] 64%|██████▍   | 25/39 [00:00<00:00, 244.44it/s] 67%|██████▋   | 26/39 [00:00<00:00, 238.35it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 257.67it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s] 69%|██████▊   | 24/35 [00:00<00:00, 232.84it/s]100%|██████████| 35/35 [00:00<00:00, 228.32it/s]
+[SKIP] oatmeal -> vc_4omini_post_db0.4.json
+Loading Dataset ...
+  0%|          | 0/36 [00:00<?, ?it/s] 53%|█████▎    | 19/36 [00:00<00:00, 180.34it/s] 72%|███████▏  | 26/36 [00:00<00:00, 171.10it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 179.79it/s]
+Loading Dataset ...
+  0%|          | 0/45 [00:00<?, ?it/s] 44%|████▍     | 20/45 [00:00<00:00, 194.14it/s] 98%|█████████▊| 44/45 [00:00<00:00, 215.96it/s]100%|██████████| 45/45 [00:00<00:00, 212.61it/s]
+[SKIP] pinwheels -> vc_4omini_post_db0.3.json
+Loading Dataset ...
+  0%|          | 0/42 [00:00<?, ?it/s] 62%|██████▏   | 26/42 [00:00<00:00, 625.54it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 809.71it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 590.26it/s]
+[SKIP] quesadilla -> vc_4omini_post_db0.2.json
+Loading Dataset ...
+  0%|          | 0/27 [00:00<?, ?it/s] 41%|████      | 11/27 [00:00<00:00, 104.96it/s] 96%|█████████▋| 26/27 [00:00<00:00, 128.52it/s]100%|██████████| 27/27 [00:00<00:00, 125.78it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 136.70it/s]
+Loading Dataset ...
+  0%|          | 0/38 [00:00<?, ?it/s] 29%|██▉       | 11/38 [00:00<00:00, 104.02it/s] 84%|████████▍ | 32/38 [00:00<00:00, 159.73it/s]100%|██████████| 38/38 [00:00<00:00, 144.96it/s]
+[READY] coffee -> vc_4omini_post_db0.3_ndb0.json
+[WRITE] /root/autodl-tmp/GTG-memory/reports/task_probe/egoper_ready_tasks_20260401_125258.json
+[WRITE] /root/autodl-tmp/GTG-memory/reports/task_probe/egoper_ready_tasks_latest.json
+[READY TASKS] ['tea', 'coffee']
+
+[STEP 2/6] Generate configs only for ready tasks
+[FOUND] task=tea -> vc_4omini_post_db0.6.json
+[WRITE] /root/autodl-tmp/GTG-memory/configs/EgoPER/tea/generated/vc_4omini_post_db0.6.baseline.train.json
+[WRITE] /root/autodl-tmp/GTG-memory/configs/EgoPER/tea/generated/vc_4omini_post_db0.6.visual_memory.train.json
+[FOUND] task=coffee -> vc_4omini_post_db0.3_ndb0.json
+[WRITE] /root/autodl-tmp/GTG-memory/configs/EgoPER/coffee/generated/vc_4omini_post_db0.6.baseline.train.json
+[WRITE] /root/autodl-tmp/GTG-memory/configs/EgoPER/coffee/generated/vc_4omini_post_db0.6.visual_memory.train.json
+
+[STEP 3/6] Train baseline on ready tasks
+tea
+coffee
+[BASELINE][START] tea
+Loading Dataset ...
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 307.48it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 321.92it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 345.95it/s]100%|██████████| 35/35 [00:00<00:00, 345.19it/s]
+Use visual memory: False
+Ignore specific or non-exsting action type for error recognition: ['Normal']
+Epoch: [1/10], Iter: [10/100] action_ce_loss:2.995	
+Epoch: [1/10], Iter: [20/100] action_ce_loss:2.700	
+Epoch: [1/10], Iter: [30/100] action_ce_loss:2.277	
+Epoch: [1/10], Iter: [40/100] action_ce_loss:2.012	
+Epoch: [1/10], Iter: [50/100] action_ce_loss:1.762	
+Epoch: [1/10], Iter: [60/100] action_ce_loss:1.628	
+Epoch: [1/10], Iter: [70/100] action_ce_loss:1.287	
+Epoch: [1/10], Iter: [80/100] action_ce_loss:1.237	
+Epoch: [1/10], Iter: [90/100] action_ce_loss:0.990	
+Epoch: [1/10], Iter: [100/100] action_ce_loss:0.834	
