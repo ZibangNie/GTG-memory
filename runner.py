@@ -237,6 +237,21 @@ class Runner:
         self.erm_lambda_add_mismatch = all_params.get("erm_lambda_add_mismatch", 2.0)
         self.erm_addition_scale = all_params.get("erm_addition_scale", 2.0)
 
+        self.erm_add_alpha_thresh = all_params.get("erm_add_alpha_thresh", 0.35)
+        self.erm_add_step_score_thresh = all_params.get("erm_add_step_score_thresh", 0.25)
+
+        self.erm_modification_penalty = all_params.get("erm_modification_penalty", 0.08)
+        self.erm_slip_bonus_base = all_params.get("erm_slip_bonus_base", 0.05)
+        self.erm_slip_bonus_topo = all_params.get("erm_slip_bonus_topo", 0.12)
+        self.erm_slip_bonus_focus = all_params.get("erm_slip_bonus_focus", 0.10)
+        self.erm_correction_bonus_base = all_params.get("erm_correction_bonus_base", 0.03)
+        self.erm_correction_bonus_anchor = all_params.get("erm_correction_bonus_anchor", 0.10)
+        self.erm_correction_bonus_score = all_params.get("erm_correction_bonus_score", 0.10)
+
+        self.erm_modification_type_id = all_params.get("erm_modification_type_id", 1)
+        self.erm_slip_type_id = all_params.get("erm_slip_type_id", 2)
+        self.erm_correction_type_id = all_params.get("erm_correction_type_id", 3)
+
         if self.use_visual_memory or self.use_semantic_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
             self.vm_lr = all_params.get("vm_learning_rate", 1e-4)
@@ -345,6 +360,7 @@ class Runner:
                     lambda_obs=self.erm_lambda_obs,
                     similarity_scale=self.erm_similarity_scale,
                     smooth_window=self.erm_smooth_window,
+
                     addition_bias=self.erm_addition_bias,
                     lambda_add_bg=self.erm_lambda_add_bg,
                     lambda_add_fallback=self.erm_lambda_add_fallback,
@@ -352,6 +368,21 @@ class Runner:
                     lambda_add_entropy=self.erm_lambda_add_entropy,
                     lambda_add_mismatch=self.erm_lambda_add_mismatch,
                     addition_scale=self.erm_addition_scale,
+
+                    add_alpha_thresh=self.erm_add_alpha_thresh,
+                    add_step_score_thresh=self.erm_add_step_score_thresh,
+
+                    modification_penalty=self.erm_modification_penalty,
+                    slip_bonus_base=self.erm_slip_bonus_base,
+                    slip_bonus_topo=self.erm_slip_bonus_topo,
+                    slip_bonus_focus=self.erm_slip_bonus_focus,
+                    correction_bonus_base=self.erm_correction_bonus_base,
+                    correction_bonus_anchor=self.erm_correction_bonus_anchor,
+                    correction_bonus_score=self.erm_correction_bonus_score,
+
+                    modification_type_id=self.erm_modification_type_id,
+                    slip_type_id=self.erm_slip_type_id,
+                    correction_type_id=self.erm_correction_type_id,
                 ).to(self.device)
 
             print("[semantic] task_dir:", self.semantic_proto_payload["task_dir"])

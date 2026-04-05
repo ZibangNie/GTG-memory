@@ -63,5 +63,19 @@
     "erm_lambda_add_lowconf": 1.0,
     "erm_lambda_add_entropy": 0.8,
     "erm_lambda_add_mismatch": 2.0,
-    "erm_addition_scale": 2.0
+    "erm_addition_scale": 2.0,
+    "erm_add_alpha_thresh": 0.35,
+    "erm_add_step_score_thresh": 0.25,
+
+    "erm_modification_penalty": 0.08,
+    "erm_slip_bonus_base": 0.05,
+    "erm_slip_bonus_topo": 0.12,
+    "erm_slip_bonus_focus": 0.10,
+    "erm_correction_bonus_base": 0.03,
+    "erm_correction_bonus_anchor": 0.10,
+    "erm_correction_bonus_score": 0.10,
+
+    "erm_modification_type_id": 1,
+    "erm_slip_type_id": 2,
+    "erm_correction_type_id": 3
 }

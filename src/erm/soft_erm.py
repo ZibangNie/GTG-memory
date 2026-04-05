@@ -9,14 +9,14 @@ import torch.nn.functional as F
 
 class SoftCandidateERM(nn.Module):
     """
-    ERM v1.6
+    ERM v1.7
     ----------
-    Design goals:
-      1) Keep multi-candidate soft conditioning + memory-enhanced query.
-      2) Keep an explicit Addition branch.
-      3) Make Addition a gated special branch rather than a globally hard-competing branch.
-      4) Make final ED follow the original/legacy style more closely:
-            type_prob -> temporal max filter -> type_pred -> final_error_pred
+    Main updates over v1.6:
+      1) Keep explicit Addition branch, but make it more conservative.
+      2) Reduce default over-attraction to Addition / Modification.
+      3) Add conditional calibration for Slip / Correction.
+      4) Keep final ED in the legacy/original style:
+            type_scores -> temporal max filter -> type_pred -> final_error_pred
       5) Keep raw ED for diagnosis:
             raw_error_pred = GTG2Vid_1 raw error mask
     """
@@ -43,17 +43,31 @@ class SoftCandidateERM(nn.Module):
         smooth_window: int = 5,
 
         # explicit Addition branch
-        addition_bias: float = -1.5,
-        lambda_add_bg: float = 2.5,
-        lambda_add_fallback: float = 1.2,
-        lambda_add_lowconf: float = 1.0,
-        lambda_add_entropy: float = 0.8,
-        lambda_add_mismatch: float = 2.0,
-        addition_scale: float = 2.0,
+        addition_bias: float = -1.8,
+        lambda_add_bg: float = 2.2,
+        lambda_add_fallback: float = 1.0,
+        lambda_add_lowconf: float = 0.8,
+        lambda_add_entropy: float = 0.5,
+        lambda_add_mismatch: float = 1.4,
+        addition_scale: float = 1.6,
 
-        # new: addition gating
-        add_alpha_thresh: float = 0.45,
-        add_step_score_thresh: float = 0.35,
+        # addition gating
+        add_alpha_thresh: float = 0.35,
+        add_step_score_thresh: float = 0.25,
+
+        # class calibration
+        modification_penalty: float = 0.08,
+        slip_bonus_base: float = 0.05,
+        slip_bonus_topo: float = 0.12,
+        slip_bonus_focus: float = 0.10,
+        correction_bonus_base: float = 0.03,
+        correction_bonus_anchor: float = 0.10,
+        correction_bonus_score: float = 0.10,
+
+        # type id assumptions (for EgoPER these match your mapping)
+        modification_type_id: int = 1,
+        slip_type_id: int = 2,
+        correction_type_id: int = 3,
 
         eps: float = 1e-8,
     ):
@@ -88,6 +102,18 @@ class SoftCandidateERM(nn.Module):
 
         self.add_alpha_thresh = float(add_alpha_thresh)
         self.add_step_score_thresh = float(add_step_score_thresh)
+
+        self.modification_penalty = float(modification_penalty)
+        self.slip_bonus_base = float(slip_bonus_base)
+        self.slip_bonus_topo = float(slip_bonus_topo)
+        self.slip_bonus_focus = float(slip_bonus_focus)
+        self.correction_bonus_base = float(correction_bonus_base)
+        self.correction_bonus_anchor = float(correction_bonus_anchor)
+        self.correction_bonus_score = float(correction_bonus_score)
+
+        self.modification_type_id = int(modification_type_id)
+        self.slip_type_id = int(slip_type_id)
+        self.correction_type_id = int(correction_type_id)
 
         self.eps = float(eps)
 
@@ -158,10 +184,6 @@ class SoftCandidateERM(nn.Module):
         raw_anchor_node: int,
         alpha_t: torch.Tensor,
     ) -> Tuple[int, bool]:
-        """
-        Returns:
-            anchor_node_id, is_fallback
-        """
         raw_anchor_node = int(raw_anchor_node)
         if raw_anchor_node in self.step_node_id_to_local:
             return raw_anchor_node, False
@@ -309,10 +331,7 @@ class SoftCandidateERM(nn.Module):
         agg_scores: torch.Tensor,            # [M]
     ) -> Tuple[torch.Tensor, bool]:
         """
-        Explicit Addition branch, but gated.
-
-        Returns:
-            add_score, allow_addition
+        Explicit Addition branch, but conservative and gated.
         """
         anchor_bg_flag = 1.0 if int(raw_anchor_node) == self.bg_idx else 0.0
         fallback_flag = 1.0 if bool(is_fallback) else 0.0
@@ -344,24 +363,88 @@ class SoftCandidateERM(nn.Module):
 
         add_score = torch.sigmoid(self.addition_scale * add_logit)
 
-        # gated participation: Addition should not globally hard-compete everywhere
         allow_addition = (
             (int(raw_anchor_node) == self.bg_idx)
             or bool(is_fallback)
-            or (float(alpha_top1.item()) < self.add_alpha_thresh)
-            or (float(best_step_err_score.item()) < self.add_step_score_thresh)
+            or (
+                (float(alpha_top1.item()) < self.add_alpha_thresh)
+                and (float(best_step_err_score.item()) < self.add_step_score_thresh)
+            )
         )
 
-        # keep compatibility with the old design intuition:
-        # if no-drop anchor lands on BG, Addition should be strongly allowed.
         if int(raw_anchor_node) == self.bg_idx:
             add_score = torch.maximum(
                 add_score,
-                torch.tensor(0.95, device=alpha_t.device, dtype=alpha_t.dtype),
+                torch.tensor(0.90, device=alpha_t.device, dtype=alpha_t.dtype),
             )
             allow_addition = True
 
         return add_score, allow_addition
+
+    def _apply_type_calibration(
+        self,
+        type_scores_t: torch.Tensor,     # [num_types+1]
+        alpha_t: torch.Tensor,           # [S]
+        candidate_weights: torch.Tensor, # [K]
+        candidate_flags: List[int],
+        agg_scores: torch.Tensor,        # [M]
+        is_fallback: bool,
+        raw_anchor_node: int,
+    ) -> torch.Tensor:
+        """
+        Re-balance type preference:
+          - reduce default Modification bias
+          - give Slip more chance when topology + focused candidates exist
+          - give Correction a mild boost when anchor is stable and step-score is decent
+        """
+        out = type_scores_t.clone()
+
+        alpha_top1 = float(alpha_t.max().item())
+
+        if candidate_weights.numel() > 0:
+            cand_entropy = float(self._normalized_entropy(candidate_weights).item())
+            cand_focus = 1.0 - cand_entropy
+        else:
+            cand_focus = 0.0
+
+        has_topo = any((flag & 4) > 0 for flag in candidate_flags)
+        stable_anchor = (not is_fallback) and (int(raw_anchor_node) != self.bg_idx)
+
+        best_step_err_score = float(agg_scores.max().item()) if agg_scores.numel() > 0 else 0.0
+
+        # penalize overly generic Modification a little
+        if 0 < self.modification_type_id <= self.num_types:
+            out[self.modification_type_id] = torch.clamp(
+                out[self.modification_type_id] - self.modification_penalty,
+                min=0.0,
+                max=1.0,
+            )
+
+        # Slip: more plausible when topology neighbors matter and candidate focus is decent
+        if 0 < self.slip_type_id <= self.num_types:
+            slip_bonus = self.slip_bonus_base
+            if has_topo:
+                slip_bonus += self.slip_bonus_topo
+            slip_bonus += self.slip_bonus_focus * cand_focus
+            out[self.slip_type_id] = torch.clamp(
+                out[self.slip_type_id] + slip_bonus,
+                min=0.0,
+                max=1.0,
+            )
+
+        # Correction: mild boost when anchor is stable and local step-conditioned score is not too weak
+        if 0 < self.correction_type_id <= self.num_types:
+            corr_bonus = self.correction_bonus_base
+            if stable_anchor:
+                corr_bonus += self.correction_bonus_anchor * alpha_top1
+            corr_bonus += self.correction_bonus_score * best_step_err_score
+            out[self.correction_type_id] = torch.clamp(
+                out[self.correction_type_id] + corr_bonus,
+                min=0.0,
+                max=1.0,
+            )
+
+        return out
 
     def forward(self, erm_inputs: Dict[str, object]):
         pred, type_pred, error_pred, _ = self.forward_with_aux(erm_inputs)
@@ -401,11 +484,10 @@ class SoftCandidateERM(nn.Module):
         tlen = int(pred_t.shape[0])
         num_err_proto = int(self.type_ids.numel())
 
-        # raw ED source from GTG2Vid_1
         raw_error_mask = pred_t == -1
         raw_error_pred = raw_error_mask.long()
 
-        # score tensor over all type ids: [0..num_types]
+        # [0..num_types]
         type_scores = torch.zeros(self.num_types + 1, tlen, device=device, dtype=torch.float32)
         type_scores[0, :] = 1.0  # default normal
 
@@ -498,7 +580,7 @@ class SoftCandidateERM(nn.Module):
                 if 0 < int(type_id) <= self.num_types:
                     type_scores[int(type_id), t] = agg_scores[proto_col]
 
-            # explicit Addition branch, but gated
+            # explicit Addition branch, but conservative and gated
             if 0 < self.addition_idx <= self.num_types:
                 add_score, allow_addition = self._compute_addition_score(
                     raw_anchor_node=raw_anchor_node,
@@ -515,6 +597,17 @@ class SoftCandidateERM(nn.Module):
                     addition_allow_seq[t] = 0.0
                 addition_score_seq[t] = add_score
 
+            # class calibration
+            type_scores[:, t] = self._apply_type_calibration(
+                type_scores_t=type_scores[:, t],
+                alpha_t=alpha_t,
+                candidate_weights=candidate_weights,
+                candidate_flags=candidate_flags,
+                agg_scores=agg_scores,
+                is_fallback=is_fallback,
+                raw_anchor_node=raw_anchor_node,
+            )
+
             candidate_count_seq[t] = len(candidate_locals)
             anchor_step_seq[t] = anchor_node_id
             anchor_fallback_seq[t] = 1.0 if is_fallback else 0.0
@@ -527,16 +620,12 @@ class SoftCandidateERM(nn.Module):
 
             aggregated_scores_seq[t, :] = type_scores[:, t]
 
-        # original-style temporal smoothing on type probability channels
+        # original-style temporal smoothing on type channels
         smoothed_scores = type_scores.clone()
         if self.smooth_window > 1:
             smoothed_scores[1:, :] = self._max_filter_1d(type_scores[1:, :])
 
-        # final type prediction follows the original style:
-        # argmax over temporally smoothed type probability
         type_pred = torch.argmax(smoothed_scores, dim=0)
-
-        # final ED is directly derived from type prediction, just like the old style
         final_error_pred = (type_pred > 0).long()
 
         aux = {
@@ -559,10 +648,6 @@ class SoftCandidateERM(nn.Module):
             "step_node_ids": self.step_node_ids.detach().cpu(),
         }
 
-        # legacy compatibility:
-        # pred      -> GTG2Vid_1 path
-        # type_pred -> final type pred
-        # error_pred-> final ED
         return (
             pred_t.detach().cpu().numpy(),
             type_pred.detach().cpu().numpy(),
