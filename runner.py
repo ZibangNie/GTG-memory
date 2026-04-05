@@ -50,12 +50,12 @@ def mode_filter(x, window_size=30):
     return filtered
 
 
-def create_log_folder(dirname, naming, dataset_name, ckpt_dir):
+def create_log_folder(dirname, naming, dataset_name, ckpt_dir, runs_dir):
     now = datetime.now()
     current_time = now.strftime("%m_%d_%H_%M_%S")
 
     ckpt_dataset_dir = os.path.join(ckpt_dir, naming, dataset_name)
-    runs_dataset_dir = os.path.join("runs", naming, dataset_name)
+    runs_dataset_dir = os.path.join(runs_dir, naming, dataset_name)
 
     # Always ensure parent directories exist first.
     os.makedirs(ckpt_dataset_dir, exist_ok=True)
@@ -417,7 +417,14 @@ class Runner:
             self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
             self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False, num_workers=1)
             self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=True, num_workers=1)
-            self.save_dir, self.writer = create_log_folder(args.dir, self.naming, dataset_name, self.ckpt_dir)
+            self.runs_dir = all_params.get("runs_dir", "runs")
+            self.save_dir, self.writer = create_log_folder(
+                args.dir,
+                self.naming,
+                dataset_name,
+                self.ckpt_dir,
+                self.runs_dir,
+            )
 
         self.G = dataset_dict["train"].G
 
