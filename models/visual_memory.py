@@ -40,11 +40,13 @@ class SlowUpdateLongMemory(nn.Module):
         self,
         summary_t: torch.Tensor,
         prev_long: torch.Tensor,
+        gate_scale=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
             summary_t: [B, input_dim]
             prev_long: [B, long_dim]
+            gate_scale: [B, 1] or [B, long_dim] or None
         Returns:
             new_long: [B, long_dim]
             gate_t:   [B, long_dim]
@@ -52,6 +54,12 @@ class SlowUpdateLongMemory(nn.Module):
         gate_t = self.write_cap * torch.sigmoid(
             self.gate_from_input(summary_t) + self.gate_from_state(prev_long)
         )
+
+        if gate_scale is not None:
+            if gate_scale.ndim == 1:
+                gate_scale = gate_scale.unsqueeze(-1)
+            gate_t = gate_t * gate_scale
+
         proposal_t = torch.tanh(
             self.update_from_input(summary_t) + self.update_from_state(prev_long)
         )

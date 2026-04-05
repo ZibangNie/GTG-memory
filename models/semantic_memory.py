@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import torch
@@ -253,6 +254,9 @@ class SemanticMemoryCore(nn.Module):
         self.uncertainty_rate = uncertainty_rate
         self.aux_dim = aux_dim
 
+        # 新增：用固定维度摘要 coverage，避免完全丢掉 coverage 信息
+        self.coverage_summary_dim = 3
+
         self.obs_fuser = nn.Sequential(
             nn.Linear(feature_dim * 2 + aux_dim, feature_dim),
             nn.LayerNorm(feature_dim),
@@ -260,7 +264,7 @@ class SemanticMemoryCore(nn.Module):
         )
 
         self.short_input_proj = nn.Sequential(
-            nn.Linear(feature_dim + aux_dim + uncertainty_dim, short_dim),
+            nn.Linear(feature_dim + aux_dim + uncertainty_dim + self.coverage_summary_dim, short_dim),
             nn.LayerNorm(short_dim),
             nn.GELU(),
         )
@@ -274,12 +278,29 @@ class SemanticMemoryCore(nn.Module):
         self.conf_gate = nn.Linear(aux_dim, 1)
 
         self.long_summary = nn.Sequential(
-            nn.Linear(short_dim + uncertainty_dim + aux_dim + 1, long_dim),
+            nn.Linear(short_dim + uncertainty_dim + aux_dim + self.coverage_summary_dim, long_dim),
             nn.LayerNorm(long_dim),
             nn.GELU(),
             nn.Linear(long_dim, long_dim),
         )
         self.long_updater = SlowUpdateLongMemory(long_dim, long_dim, write_cap=long_write_cap)
+
+    def _summarize_coverage(self, coverage: torch.Tensor) -> torch.Tensor:
+        """
+        coverage: [B, S]
+        returns:  [B, 3] = [max, mean, normalized_entropy]
+        """
+        cov_sum = coverage.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+        cov_prob = coverage / cov_sum
+
+        cov_max = coverage.max(dim=-1).values
+        cov_mean = coverage.mean(dim=-1)
+
+        num_steps = max(int(coverage.shape[-1]), 2)
+        cov_entropy = entropy_from_probs(cov_prob.clamp_min(1e-8), dim=-1)
+        cov_entropy = cov_entropy / math.log(num_steps)
+
+        return torch.stack([cov_max, cov_mean, cov_entropy], dim=-1)
 
     def forward(
         self,
@@ -300,6 +321,7 @@ class SemanticMemoryCore(nn.Module):
 
         sem_short_list, sem_long_list, sem_long_gate_list = [], [], []
         coverage_list, uncertainty_list, fused_obs_list = [], [], []
+        coverage_summary_list = []
 
         for t in range(tlen):
             alpha_t = step_posteriors[:, t, :]
@@ -313,18 +335,25 @@ class SemanticMemoryCore(nn.Module):
             uncertainty = ema_update(uncertainty, unc_raw_t, self.uncertainty_rate)
             coverage = ema_update(coverage, alpha_t, self.coverage_rate)
 
+            coverage_summary_t = self._summarize_coverage(coverage)
             conf_t = torch.sigmoid(self.conf_gate(aux_t))  # [B, 1]
 
-            short_in_t = self.short_input_proj(torch.cat([fused_obs_t, aux_t, uncertainty], dim=-1))
+            # short：真的吃到 coverage 摘要
+            short_in_t = self.short_input_proj(
+                torch.cat([fused_obs_t, aux_t, uncertainty, coverage_summary_t], dim=-1)
+            )
             short_in_t = conf_t * short_in_t
             sem_short = self.short_cell(short_in_t, sem_short)
 
-            coverage_strength = coverage.max(dim=-1, keepdim=True).values
+            # long：真的用 conf_t 控实际写入，不只是记录个假的 gate
             long_summary_t = self.long_summary(
-                torch.cat([sem_short, uncertainty, aux_t, coverage_strength], dim=-1)
+                torch.cat([sem_short, uncertainty, aux_t, coverage_summary_t], dim=-1)
             )
-            sem_long, sem_long_gate_raw = self.long_updater(long_summary_t, sem_long)
-            sem_long_gate = conf_t * sem_long_gate_raw
+            sem_long, sem_long_gate = self.long_updater(
+                long_summary_t,
+                sem_long,
+                gate_scale=conf_t,
+            )
 
             sem_short_list.append(sem_short)
             sem_long_list.append(sem_long)
@@ -332,12 +361,14 @@ class SemanticMemoryCore(nn.Module):
             coverage_list.append(coverage)
             uncertainty_list.append(uncertainty)
             fused_obs_list.append(fused_obs_t)
+            coverage_summary_list.append(coverage_summary_t)
 
         return {
             "sem_short_seq": torch.stack(sem_short_list, dim=1),
             "sem_long_seq": torch.stack(sem_long_list, dim=1),
             "sem_long_gate_seq": torch.stack(sem_long_gate_list, dim=1),
             "coverage_trace_seq": torch.stack(coverage_list, dim=1),
+            "coverage_summary_seq": torch.stack(coverage_summary_list, dim=1),
             "uncertainty_trace_seq": torch.stack(uncertainty_list, dim=1),
             "semantic_obs_seq": torch.stack(fused_obs_list, dim=1),
         }

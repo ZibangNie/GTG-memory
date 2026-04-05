@@ -175,6 +175,16 @@ class Runner:
         self.is_training = not args.eval
         self.dataset_name = dataset_name
 
+        self.dump_debug_aux = bool(
+            getattr(args, "dump_debug", False) or all_params.get("dump_debug_aux", False)
+        )
+
+        arg_debug_max_videos = getattr(args, "debug_max_videos", -1)
+        cfg_debug_max_videos = int(all_params.get("debug_dump_max_videos", -1))
+        self.debug_dump_max_videos = (
+            arg_debug_max_videos if arg_debug_max_videos >= 0 else cfg_debug_max_videos
+        )
+
         # visual-memory config
         self.use_visual_memory = all_params.get("use_visual_memory", False)
         self.use_semantic_memory = all_params.get("use_semantic_memory", False)
@@ -261,10 +271,17 @@ class Runner:
             self.addition_idx = self.actiontype2idx["Preparation Error"]
         self.num_types = len(self.actiontype2idx) - 1
 
-        if "node_drop_base" in all_params:
-            self.node_drop_base = all_params["node_drop_base"]
-        else:
+        raw_node_drop_base = all_params.get("node_drop_base", None)
+        if raw_node_drop_base is None:
             self.node_drop_base = self.gtg_num_classes
+        elif raw_node_drop_base <= 0:
+            self.node_drop_base = self.gtg_num_classes
+            print(
+                f"[warn] node_drop_base={raw_node_drop_base} is unsafe; "
+                f"override to {self.node_drop_base}"
+            )
+        else:
+            self.node_drop_base = raw_node_drop_base
 
         if "window_size" in all_params:
             self.window_size = all_params["window_size"]
@@ -472,6 +489,10 @@ class Runner:
         print("Use visual memory:", self.use_visual_memory)
         print("Use semantic memory:", self.use_semantic_memory)
         print("Use new ERM:", self.use_new_erm)
+        print("Dump debug aux:", self.dump_debug_aux)
+        print("Debug max videos:", self.debug_dump_max_videos)
+        print("node_drop_base:", self.node_drop_base)
+
         if self.use_visual_memory or self.use_semantic_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
@@ -587,7 +608,7 @@ class Runner:
             base_proj = scorer.base_fuse_proj(base_seq)
             fusion_delta = fused_seq - base_proj
             fusion_ratio = (
-                fusion_delta.norm(dim=-1).mean() / (base_proj.norm(dim=-1).mean() + 1e-8)
+                    fusion_delta.norm(dim=-1).mean() / (base_proj.norm(dim=-1).mean() + 1e-8)
             ).item()
             logs["MEM/fusion_ratio"] = fusion_ratio
 
@@ -607,7 +628,6 @@ class Runner:
                 logs["MEM/gate_near_zero_ratio"] = (gate_seq < 0.02).float().mean().item()
                 logs["MEM/gate_near_cap_ratio"] = (gate_seq > near_cap_threshold).float().mean().item()
 
-                # old visual scorer has explicit short/long fuse projectors
                 if hasattr(scorer, "short_fuse_proj") and hasattr(scorer, "long_fuse_proj"):
                     short_proj = scorer.short_fuse_proj(short_seq)
                     long_proj = scorer.long_fuse_proj(long_seq)
@@ -640,6 +660,12 @@ class Runner:
                     logs["SEM/coverage_mean"] = coverage_seq.mean().item()
                     logs["SEM/coverage_peak"] = coverage_seq.max(dim=-1).values.mean().item()
 
+                if "coverage_summary_seq" in aux:
+                    coverage_summary_seq = aux["coverage_summary_seq"].detach()
+                    logs["SEM/coverage_summary_max"] = coverage_summary_seq[..., 0].mean().item()
+                    logs["SEM/coverage_summary_mean"] = coverage_summary_seq[..., 1].mean().item()
+                    logs["SEM/coverage_summary_entropy"] = coverage_summary_seq[..., 2].mean().item()
+
                 if "uncertainty_trace_seq" in aux:
                     uncertainty_seq = aux["uncertainty_trace_seq"].detach()
                     logs["SEM/uncertainty_mean"] = uncertainty_seq.mean().item()
@@ -669,10 +695,44 @@ class Runner:
                     logs["SEM/error_mass_mean"] = error_mass.mean().item()
 
                 if "main_logits" in aux and "final_logits" in aux:
-                    main_logits = aux["main_logits"].detach()
-                    final_logits = aux["final_logits"].detach()
+                    main_logits = aux["main_logits"].detach()  # [B, C, T]
+                    final_logits = aux["final_logits"].detach()  # [B, C, T]
+
+                    logs["SEM/main_vs_final_logit_diff"] = (final_logits - main_logits).abs().mean().item()
+
+                    main_probs = torch.softmax(main_logits, dim=1)
+                    final_probs = torch.softmax(final_logits, dim=1)
+                    logs["SEM/main_entropy_mean"] = (
+                        -(main_probs.clamp_min(1e-8) * main_probs.clamp_min(1e-8).log()).sum(dim=1).mean().item()
+                    )
+                    logs["SEM/final_entropy_mean"] = (
+                        -(final_probs.clamp_min(1e-8) * final_probs.clamp_min(1e-8).log()).sum(dim=1).mean().item()
+                    )
+                    logs["SEM/final_top1_prob_mean"] = final_probs.max(dim=1).values.mean().item()
+
                     proto_boost = final_logits - main_logits
                     logs["SEM/proto_boost_abs_mean"] = proto_boost.abs().mean().item()
+
+                    step_node_ids = torch.as_tensor(aux.get("step_node_ids", []), dtype=torch.long,
+                                                    device=main_logits.device)
+                    extra_node_ids = torch.as_tensor(aux.get("extra_node_ids", []), dtype=torch.long,
+                                                     device=main_logits.device)
+
+                    if step_node_ids.numel() > 0:
+                        main_step_mean = main_logits.index_select(1, step_node_ids).mean().item()
+                        final_step_mean = final_logits.index_select(1, step_node_ids).mean().item()
+                        logs["SEM/main_step_logit_mean"] = main_step_mean
+                        logs["SEM/final_step_logit_mean"] = final_step_mean
+
+                    if extra_node_ids.numel() > 0:
+                        main_extra_mean = main_logits.index_select(1, extra_node_ids).mean().item()
+                        final_extra_mean = final_logits.index_select(1, extra_node_ids).mean().item()
+                        logs["SEM/main_extra_logit_mean"] = main_extra_mean
+                        logs["SEM/final_extra_logit_mean"] = final_extra_mean
+
+                        if step_node_ids.numel() > 0:
+                            logs["SEM/main_step_vs_extra_gap"] = main_step_mean - main_extra_mean
+                            logs["SEM/final_step_vs_extra_gap"] = final_step_mean - final_extra_mean
 
             return logs
 
@@ -954,6 +1014,122 @@ class Runner:
 
         return logs
 
+    def _should_dump_debug(self, video_idx):
+        if not self.dump_debug_aux:
+            return False
+        if self.debug_dump_max_videos is not None and self.debug_dump_max_videos >= 0:
+            return video_idx < self.debug_dump_max_videos
+        return True
+
+    @staticmethod
+    def _to_serializable(x):
+        if x is None:
+            return None
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().tolist()
+        if isinstance(x, np.ndarray):
+            return x.tolist()
+        return x
+
+    def _dump_model_debug_json(
+        self,
+        video_id,
+        aux,
+        pred,
+        no_drop_pred_raw,
+        label=None,
+        type_label=None,
+    ):
+        if aux is None:
+            return
+
+        out_dir = os.path.join(self.save_dir, "output", "model_debug")
+        os.makedirs(out_dir, exist_ok=True)
+
+        payload = {
+            "video_id": video_id,
+            "pred": np.asarray(pred).tolist(),
+            "pred_error_mask": (np.asarray(pred) == -1).astype(int).tolist(),
+            "no_drop_pred_raw": np.asarray(no_drop_pred_raw).tolist(),
+            "gt_label": self._to_serializable(label),
+            "gt_type_label": self._to_serializable(type_label),
+        }
+
+        keep_keys = [
+            "raw_step_logits",
+            "step_posteriors",
+            "error_posteriors",
+            "candidate_mask",
+            "aux_stats_seq",
+            "sem_short_seq",
+            "sem_long_seq",
+            "sem_long_gate_seq",
+            "coverage_trace_seq",
+            "coverage_summary_seq",
+            "uncertainty_trace_seq",
+            "semantic_obs_seq",
+            "semantic_fuse_gate_seq",
+            "proto_gate",
+            "main_logits",
+            "final_logits",
+            "step_node_ids",
+            "extra_node_ids",
+        ]
+
+        for k in keep_keys:
+            if k in aux:
+                payload[k] = self._to_serializable(aux[k])
+
+        if "main_logits" in aux and "final_logits" in aux:
+            main_logits = aux["main_logits"].detach().cpu().squeeze(0)   # [C, T]
+            final_logits = aux["final_logits"].detach().cpu().squeeze(0) # [C, T]
+
+            main_probs = torch.softmax(main_logits, dim=0)
+            final_probs = torch.softmax(final_logits, dim=0)
+
+            main_entropy_t = -(
+                main_probs.clamp_min(1e-8) * main_probs.clamp_min(1e-8).log()
+            ).sum(dim=0)
+            final_entropy_t = -(
+                final_probs.clamp_min(1e-8) * final_probs.clamp_min(1e-8).log()
+            ).sum(dim=0)
+
+            payload["main_entropy_t"] = main_entropy_t.tolist()
+            payload["final_entropy_t"] = final_entropy_t.tolist()
+            payload["main_top1_prob_t"] = main_probs.max(dim=0).values.tolist()
+            payload["final_top1_prob_t"] = final_probs.max(dim=0).values.tolist()
+            payload["main_vs_final_logit_abs_mean_t"] = (
+                (final_logits - main_logits).abs().mean(dim=0).tolist()
+            )
+
+            step_node_ids = torch.as_tensor(
+                aux.get("step_node_ids", []), dtype=torch.long
+            )
+            extra_node_ids = torch.as_tensor(
+                aux.get("extra_node_ids", []), dtype=torch.long
+            )
+
+            if step_node_ids.numel() > 0:
+                payload["main_step_mean_t"] = main_logits.index_select(0, step_node_ids).mean(dim=0).tolist()
+                payload["final_step_mean_t"] = final_logits.index_select(0, step_node_ids).mean(dim=0).tolist()
+
+            if extra_node_ids.numel() > 0:
+                main_extra_mean_t = main_logits.index_select(0, extra_node_ids).mean(dim=0)
+                final_extra_mean_t = final_logits.index_select(0, extra_node_ids).mean(dim=0)
+
+                payload["main_extra_mean_t"] = main_extra_mean_t.tolist()
+                payload["final_extra_mean_t"] = final_extra_mean_t.tolist()
+
+                if step_node_ids.numel() > 0:
+                    main_step_mean_t = main_logits.index_select(0, step_node_ids).mean(dim=0)
+                    final_step_mean_t = final_logits.index_select(0, step_node_ids).mean(dim=0)
+
+                    payload["main_step_vs_extra_gap_t"] = (main_step_mean_t - main_extra_mean_t).tolist()
+                    payload["final_step_vs_extra_gap_t"] = (final_step_mean_t - final_extra_mean_t).tolist()
+
+        with open(os.path.join(out_dir, f"{video_id}.json"), "w") as fp:
+            json.dump(payload, fp)
+
     def _dump_erm_debug_json(self, video_id, erm_aux):
         """
         Save per-video ERM-v2 debug tensors for offline inspection.
@@ -1157,13 +1333,24 @@ class Runner:
                         )
                         erm_aux = None
 
+                    do_dump_debug = self._should_dump_debug(video_idx)
+
+                    if do_dump_debug:
+                        self._dump_model_debug_json(
+                            video_id=video,
+                            aux=aux,
+                            pred=pred,
+                            no_drop_pred_raw=no_drop_pred_raw,
+                            label=label.cpu(),
+                            type_label=type_label.cpu(),
+                        )
+
                     if self.use_new_erm and erm_aux is not None:
                         erm_log_dict = self._compute_erm_log_dict(erm_aux)
                         if len(erm_log_dict) > 0:
                             erm_log_buffer.append(erm_log_dict)
 
-                        # dump per-video debug only when vis is enabled
-                        if self.is_vis:
+                        if do_dump_debug:
                             self._dump_erm_debug_json(video, erm_aux)
 
                     # let error as an additional class
