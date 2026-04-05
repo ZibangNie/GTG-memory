@@ -1,3 +1,5 @@
+# runner.py
+
 import os
 import tqdm
 import json
@@ -57,7 +59,6 @@ def create_log_folder(dirname, naming, dataset_name, ckpt_dir):
     ckpt_dataset_dir = os.path.join(ckpt_dir, naming, dataset_name)
     runs_dataset_dir = os.path.join("runs", naming, dataset_name)
 
-    # Always ensure parent directories exist first.
     os.makedirs(ckpt_dataset_dir, exist_ok=True)
     os.makedirs(runs_dataset_dir, exist_ok=True)
 
@@ -228,6 +229,14 @@ class Runner:
         self.erm_similarity_scale = all_params.get("erm_similarity_scale", 20.0)
         self.erm_smooth_window = all_params.get("erm_smooth_window", 5)
 
+        self.erm_addition_bias = all_params.get("erm_addition_bias", -1.5)
+        self.erm_lambda_add_bg = all_params.get("erm_lambda_add_bg", 2.5)
+        self.erm_lambda_add_fallback = all_params.get("erm_lambda_add_fallback", 1.2)
+        self.erm_lambda_add_lowconf = all_params.get("erm_lambda_add_lowconf", 1.0)
+        self.erm_lambda_add_entropy = all_params.get("erm_lambda_add_entropy", 0.8)
+        self.erm_lambda_add_mismatch = all_params.get("erm_lambda_add_mismatch", 2.0)
+        self.erm_addition_scale = all_params.get("erm_addition_scale", 2.0)
+
         if self.use_visual_memory or self.use_semantic_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
             self.vm_lr = all_params.get("vm_learning_rate", 1e-4)
@@ -336,6 +345,13 @@ class Runner:
                     lambda_obs=self.erm_lambda_obs,
                     similarity_scale=self.erm_similarity_scale,
                     smooth_window=self.erm_smooth_window,
+                    addition_bias=self.erm_addition_bias,
+                    lambda_add_bg=self.erm_lambda_add_bg,
+                    lambda_add_fallback=self.erm_lambda_add_fallback,
+                    lambda_add_lowconf=self.erm_lambda_add_lowconf,
+                    lambda_add_entropy=self.erm_lambda_add_entropy,
+                    lambda_add_mismatch=self.erm_lambda_add_mismatch,
+                    addition_scale=self.erm_addition_scale,
                 ).to(self.device)
 
             print("[semantic] task_dir:", self.semantic_proto_payload["task_dir"])
@@ -369,12 +385,9 @@ class Runner:
         dataset_dict = get_datasets(all_params, self.num_classes, self.action2idx, self.actiontype2idx, args.eval)
 
         if args.eval:
-            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False,
-                                                           num_workers=1)
-            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False,
-                                                          num_workers=1)
-            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False,
-                                                            num_workers=1)
+            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
+            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False, num_workers=1)
+            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False, num_workers=1)
 
             load_dir_name = args.load_dir if args.load_dir is not None else args.dir
             save_dir_name = args.save_dir if args.save_dir is not None else load_dir_name
@@ -492,7 +505,6 @@ class Runner:
         skipped_keys = []
 
         for k, v in state_dict.items():
-            # Only load backbone trunk. Do not load visual-memory-only params.
             if k.startswith("conv_in.") or k.startswith("module."):
                 if k in model_state and model_state[k].shape == v.shape:
                     model_state[k] = v
@@ -534,7 +546,6 @@ class Runner:
                 steps.append(pre_label)
                 timestamps.append([st, ed])
 
-        # Handle the edge case where all frames are background and ignore_bg=True.
         if len(steps) == 0:
             empty_steps = torch.empty((0,), dtype=torch.long)
             empty_timestamps = torch.empty((0, 2), dtype=torch.float32)
@@ -565,13 +576,6 @@ class Runner:
         return (seq[:, 1:] - seq[:, :-1]).norm(dim=-1).mean().item()
 
     def _compute_memory_log_dict(self, aux):
-        """
-        Compute scalar memory diagnostics from forward_with_aux() outputs.
-
-        Supports both:
-        - VisualMemoryScorer
-        - VisualSemanticMemoryScorer
-        """
         if (not (self.use_visual_memory or self.use_semantic_memory)) or ("base_seq" not in aux):
             return {}
 
@@ -583,7 +587,6 @@ class Runner:
 
             logs = {}
 
-            # shared quantities
             base_proj = scorer.base_fuse_proj(base_seq)
             fusion_delta = fused_seq - base_proj
             fusion_ratio = (
@@ -591,7 +594,6 @@ class Runner:
             ).item()
             logs["MEM/fusion_ratio"] = fusion_ratio
 
-            # ---------- visual-memory-only style logs ----------
             if "short_memory_seq" in aux and "long_memory_seq" in aux and "long_write_gate_seq" in aux:
                 short_seq = aux["short_memory_seq"].detach()
                 long_seq = aux["long_memory_seq"].detach()
@@ -607,7 +609,6 @@ class Runner:
                 logs["MEM/gate_near_zero_ratio"] = (gate_seq < 0.02).float().mean().item()
                 logs["MEM/gate_near_cap_ratio"] = (gate_seq > near_cap_threshold).float().mean().item()
 
-                # old visual scorer has explicit short/long fuse projectors
                 if hasattr(scorer, "short_fuse_proj") and hasattr(scorer, "long_fuse_proj"):
                     short_proj = scorer.short_fuse_proj(short_seq)
                     long_proj = scorer.long_fuse_proj(long_seq)
@@ -615,7 +616,6 @@ class Runner:
                     logs["MEM/cos_base_long"] = F.cosine_similarity(base_proj, long_proj, dim=-1).mean().item()
                     logs["MEM/cos_short_long"] = F.cosine_similarity(short_proj, long_proj, dim=-1).mean().item()
 
-            # ---------- semantic-memory-specific logs ----------
             if self.use_semantic_memory:
                 if "sem_short_seq" in aux:
                     sem_short_seq = aux["sem_short_seq"].detach()
@@ -852,30 +852,27 @@ class Runner:
         return erm_inputs
 
     def _compute_erm_log_dict(self, erm_aux):
-        """
-        Compute scalar ERM-v2 diagnostics from SoftCandidateERM forward_with_aux() outputs.
-        """
         if erm_aux is None:
             return {}
 
         logs = {}
 
         with torch.no_grad():
-            candidate_count = torch.as_tensor(erm_aux["candidate_count_seq"]).float()   # [T]
+            candidate_count = torch.as_tensor(erm_aux["candidate_count_seq"]).float()
             err_mask = candidate_count > 0
 
             if err_mask.sum().item() == 0:
                 return {}
 
-            candidate_weights = torch.as_tensor(erm_aux["candidate_weights_seq"]).float()   # [T, K]
-            candidate_flags = torch.as_tensor(erm_aux["candidate_flags_seq"]).long()        # [T, K]
-            anchor_fallback = torch.as_tensor(erm_aux["anchor_fallback_seq"]).float()       # [T]
-            q_component_norms = torch.as_tensor(erm_aux["q_component_norms"]).float()       # [T, 6]
-            joint_scores = torch.as_tensor(erm_aux["joint_scores_seq"]).float()             # [T, K, M]
+            candidate_weights = torch.as_tensor(erm_aux["candidate_weights_seq"]).float()
+            candidate_flags = torch.as_tensor(erm_aux["candidate_flags_seq"]).long()
+            anchor_fallback = torch.as_tensor(erm_aux["anchor_fallback_seq"]).float()
+            q_component_norms = torch.as_tensor(erm_aux["q_component_norms"]).float()
+            joint_scores = torch.as_tensor(erm_aux["joint_scores_seq"]).float()
             aggregated_scores = torch.as_tensor(erm_aux["aggregated_scores_seq"]).float()
             smoothed_scores = torch.as_tensor(erm_aux["smoothed_scores_seq"]).float()
+            addition_scores = torch.as_tensor(erm_aux.get("addition_score_seq", torch.zeros(candidate_count.shape[0]))).float()
 
-            # make sure both are [T, C]
             if aggregated_scores.ndim == 2 and aggregated_scores.shape[0] != candidate_count.shape[0]:
                 aggregated_scores = aggregated_scores.transpose(0, 1)
 
@@ -905,7 +902,6 @@ class Runner:
             has_semantic_candidate = semantic_mask.any(dim=-1).float()
             logs["ERM/semantic_candidate_present_ratio"] = has_semantic_candidate[err_mask].mean().item()
 
-            # candidate entropy over K
             cand_entropy = -(
                 candidate_weights.clamp_min(1e-8) * candidate_weights.clamp_min(1e-8).log()
             ).sum(dim=-1)
@@ -913,7 +909,6 @@ class Runner:
 
             logs["ERM/fallback_ratio"] = anchor_fallback[err_mask].mean().item()
 
-            # q_component_norms = [q_frame, q_vis, q_sem, q_obs, q_final, sem_conf]
             logs["ERM/q_frame_contrib_norm"] = q_component_norms[err_mask, 0].mean().item()
             logs["ERM/q_vis_contrib_norm"] = q_component_norms[err_mask, 1].mean().item()
             logs["ERM/q_sem_contrib_norm"] = q_component_norms[err_mask, 2].mean().item()
@@ -923,8 +918,8 @@ class Runner:
 
             logs["ERM/joint_score_mean"] = joint_scores[err_mask].mean().item()
             logs["ERM/joint_score_std"] = joint_scores[err_mask].std(unbiased=False).item()
+            logs["ERM/addition_score_mean"] = addition_scores[err_mask].mean().item()
 
-            # use non-normal columns only
             err_scores_before = aggregated_scores[err_mask, 1:]
             err_scores_after = smoothed_scores[err_mask, 1:]
 
@@ -955,9 +950,6 @@ class Runner:
         return logs
 
     def _dump_erm_debug_json(self, video_id, erm_aux):
-        """
-        Save per-video ERM-v2 debug tensors for offline inspection.
-        """
         if erm_aux is None:
             return
         if not self.use_new_erm:
@@ -989,7 +981,6 @@ class Runner:
             for idx in range(self.num_iterations):
                 feature, label, type_label, video = self.get_data_sample()
 
-                video = video
                 label = label.squeeze(0).long().cpu()
                 type_label = type_label.squeeze(0).long().cpu()
 
@@ -1001,7 +992,6 @@ class Runner:
 
                 steps, timestamps = self.from_framewise_to_steps(label, ignore_bg=False)
 
-                # relabel background segment
                 new_steps = self.relabel_bg(steps.clone())
                 new_label = segments_to_framewise(timestamps, new_steps, feature.size(2))
 
@@ -1074,11 +1064,9 @@ class Runner:
             for loader_name, loader in loaders.items():
                 video_pair_list = []
                 type_video_pair_list = []
-                error_video_pair_list = []
+                raw_error_video_pair_list = []
+                final_error_video_pair_list = []
                 predstep_steps = []
-                acc_list = []
-                tpr_list = []
-                fpr_list = []
                 erm_log_buffer = []
 
                 for video_idx, data in enumerate(loader):
@@ -1149,6 +1137,9 @@ class Runner:
                             video_id=video,
                         )
                         pred, type_pred, error_pred, erm_aux = self.erm_module.forward_with_aux(erm_inputs)
+
+                        raw_error_pred = np.asarray(erm_aux["raw_error_pred_seq"])
+                        final_error_pred = np.asarray(erm_aux["final_error_pred_seq"])
                     else:
                         pred, type_pred, error_pred = self.erm(
                             pred,
@@ -1156,17 +1147,17 @@ class Runner:
                             feature.permute(0, 2, 1).cpu().squeeze(0),
                         )
                         erm_aux = None
+                        raw_error_pred = np.copy(error_pred)
+                        final_error_pred = np.copy(error_pred)
 
                     if self.use_new_erm and erm_aux is not None:
                         erm_log_dict = self._compute_erm_log_dict(erm_aux)
                         if len(erm_log_dict) > 0:
                             erm_log_buffer.append(erm_log_dict)
 
-                        # dump per-video debug only when vis is enabled
                         if self.is_vis:
                             self._dump_erm_debug_json(video, erm_aux)
 
-                    # let error as an additional class
                     label_w_error_cls = label.clone()
                     label_w_error_cls[type_label != 0] = -1
 
@@ -1174,35 +1165,35 @@ class Runner:
                     log_dir = "log"
 
                     if self.is_vis:
-                        if not os.path.exists(os.path.join(self.save_dir, vis_dir)):
-                            os.mkdir(os.path.join(self.save_dir, vis_dir))
-                        if not os.path.exists(os.path.join(self.save_dir, vis_dir, "gt")):
-                            os.mkdir(os.path.join(self.save_dir, vis_dir, "gt"))
+                        os.makedirs(os.path.join(self.save_dir, vis_dir), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, vis_dir, "gt"), exist_ok=True)
 
                         draw_pred(label_w_error_cls.long(), "gt", self.draw_idx2action, os.path.join(self.save_dir, vis_dir, "gt", video + "_as"))
                         draw_pred(torch.from_numpy(pred).long(), "as", self.draw_idx2action, os.path.join(self.save_dir, vis_dir, video + "_as"))
                         draw_pred(type_label.squeeze(0).cpu().long(), "gt", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, "gt", video + "_er"))
                         draw_pred(torch.from_numpy(type_pred).long(), "er", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, video + "_er"))
                         draw_pred(error_label.squeeze(0).cpu().long(), "gt", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, "gt", video + "_ed"))
-                        draw_pred(torch.from_numpy(error_pred).long(), "ed", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, video + "_ed"))
+                        draw_pred(torch.from_numpy(final_error_pred).long(), "ed", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, video + "_ed"))
+                        draw_pred(torch.from_numpy(raw_error_pred).long(), "ed", self.idx2actiontype, os.path.join(self.save_dir, vis_dir, video + "_ed_raw"))
 
-                        if not os.path.exists(os.path.join(self.save_dir, "output")):
-                            os.mkdir(os.path.join(self.save_dir, "output"))
-                        if not os.path.exists(os.path.join(self.save_dir, "output", "tas_nodrop")):
-                            os.mkdir(os.path.join(self.save_dir, "output", "tas_nodrop"))
-                        if not os.path.exists(os.path.join(self.save_dir, "output", "tas")):
-                            os.mkdir(os.path.join(self.save_dir, "output", "tas"))
-                        if not os.path.exists(os.path.join(self.save_dir, "output", "ed")):
-                            os.mkdir(os.path.join(self.save_dir, "output", "ed"))
-                        if not os.path.exists(os.path.join(self.save_dir, "output", "er")):
-                            os.mkdir(os.path.join(self.save_dir, "output", "er"))
+                        os.makedirs(os.path.join(self.save_dir, "output"), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, "output", "tas_nodrop"), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, "output", "tas"), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, "output", "ed_raw"), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, "output", "ed_final"), exist_ok=True)
+                        os.makedirs(os.path.join(self.save_dir, "output", "ed"), exist_ok=True)  # legacy alias
+                        os.makedirs(os.path.join(self.save_dir, "output", "er"), exist_ok=True)
 
                         with open(os.path.join(self.save_dir, "output", "tas_nodrop", video + ".txt"), "w") as fp:
                             json.dump(no_drop_pred.tolist(), fp)
                         with open(os.path.join(self.save_dir, "output", "tas", video + ".txt"), "w") as fp:
                             json.dump(pred.tolist(), fp)
+                        with open(os.path.join(self.save_dir, "output", "ed_raw", video + ".txt"), "w") as fp:
+                            json.dump(raw_error_pred.tolist(), fp)
+                        with open(os.path.join(self.save_dir, "output", "ed_final", video + ".txt"), "w") as fp:
+                            json.dump(final_error_pred.tolist(), fp)
                         with open(os.path.join(self.save_dir, "output", "ed", video + ".txt"), "w") as fp:
-                            json.dump(error_pred.tolist(), fp)
+                            json.dump(final_error_pred.tolist(), fp)
                         with open(os.path.join(self.save_dir, "output", "er", video + ".txt"), "w") as fp:
                             json.dump(type_pred.tolist(), fp)
 
@@ -1210,12 +1201,15 @@ class Runner:
                     type_video_pair_list.append(Video(video_idx, type_pred.tolist(), type_label.cpu().tolist()))
 
                     error_label[error_label > 0] = 1
-                    error_video_pair_list.append(Video(video_idx, error_pred.tolist(), error_label.tolist()))
+                    raw_error_video_pair_list.append(Video(video_idx, raw_error_pred.tolist(), error_label.tolist()))
+                    final_error_video_pair_list.append(Video(video_idx, final_error_pred.tolist(), error_label.tolist()))
 
-                    pred[pred == -1] = self.bg_idx
-                    label[label == -1] = self.bg_idx
-                    steps, _ = self.from_framewise_to_steps(label, ignore_bg=True)
-                    pred_steps, _ = self.from_framewise_to_steps(torch.tensor(pred).long(), ignore_bg=True)
+                    pred_for_omit = pred.copy()
+                    pred_for_omit[pred_for_omit == -1] = self.bg_idx
+                    label_for_omit = label.clone()
+                    label_for_omit[label_for_omit == -1] = self.bg_idx
+                    steps, _ = self.from_framewise_to_steps(label_for_omit, ignore_bg=True)
+                    pred_steps, _ = self.from_framewise_to_steps(torch.tensor(pred_for_omit).long(), ignore_bg=True)
                     predstep_steps.append([pred_steps, steps])
 
                 if self.naming == "EgoPER":
@@ -1226,12 +1220,14 @@ class Runner:
                 else:
                     omit_log = None
 
+                # AS
                 ckpt = Checkpoint(bg_class=[self.ignore_idx])
                 ckpt.add_videos(video_pair_list)
                 as_out, as_per_out = ckpt.compute_metrics()
                 as_out_log = "|Edit:%.1f|Acc:%.1f|" % (as_out["edit"] * 100, as_out["acc"] * 100)
                 as_per_out_log, as_avg_f1 = self.compute_per_out_log(as_per_out, mode="as")
 
+                # ER
                 ckpt = Checkpoint(bg_class=[self.ignore_idx])
                 ckpt.add_videos(type_video_pair_list)
                 er_out, er_per_out = ckpt.compute_metrics()
@@ -1242,44 +1238,71 @@ class Runner:
                 )
                 er_per_out_log, er_avg_f1 = self.compute_per_out_log(er_per_out, use_ignore=True, mode="er")
 
+                # raw ED
                 ckpt = Checkpoint(bg_class=[self.ignore_idx])
-                ckpt.add_videos(error_video_pair_list)
-                ed_out, ed_per_out = ckpt.compute_metrics()
-                ed_out_log = "|Error Detection|F1@.1:%.1f|F1@.25:%.1f|F1@.5:%.1f|" % (
-                    ed_out["F1@0.100"] * 100,
-                    ed_out["F1@0.250"] * 100,
-                    ed_out["F1@0.500"] * 100,
+                ckpt.add_videos(raw_error_video_pair_list)
+                raw_ed_out, raw_ed_per_out = ckpt.compute_metrics()
+                raw_ed_out_log = "|Raw Error Detection|F1@.1:%.1f|F1@.25:%.1f|F1@.5:%.1f|" % (
+                    raw_ed_out["F1@0.100"] * 100,
+                    raw_ed_out["F1@0.250"] * 100,
+                    raw_ed_out["F1@0.500"] * 100,
                 )
-                ed_per_out_log, ed_avg_f1 = self.compute_per_out_log(ed_per_out, mode="ed")
+                raw_ed_per_out_log, raw_ed_avg_f1 = self.compute_per_out_log(raw_ed_per_out, mode="ed")
 
-                if not os.path.exists(os.path.join(self.save_dir, log_dir)):
-                    os.mkdir(os.path.join(self.save_dir, log_dir))
+                # final ED
+                ckpt = Checkpoint(bg_class=[self.ignore_idx])
+                ckpt.add_videos(final_error_video_pair_list)
+                final_ed_out, final_ed_per_out = ckpt.compute_metrics()
+                final_ed_out_log = "|Final Error Detection|F1@.1:%.1f|F1@.25:%.1f|F1@.5:%.1f|" % (
+                    final_ed_out["F1@0.100"] * 100,
+                    final_ed_out["F1@0.250"] * 100,
+                    final_ed_out["F1@0.500"] * 100,
+                )
+                final_ed_per_out_log, final_ed_avg_f1 = self.compute_per_out_log(final_ed_per_out, mode="ed")
 
-                as_out_logs = as_per_out_log
+                os.makedirs(os.path.join(self.save_dir, log_dir), exist_ok=True)
+
+                as_out_logs = list(as_per_out_log)
                 as_out_logs.append("\n\n")
                 as_out_logs.append(as_out_log)
 
-                er_out_logs = er_per_out_log
+                er_out_logs = list(er_per_out_log)
+                er_out_logs.append("\n\n")
+                er_out_logs.append(er_out_log)
 
-                ed_out_logs = ed_per_out_log
-                ed_out_logs.append("\n\n")
-
+                raw_ed_out_logs = list(raw_ed_per_out_log)
+                raw_ed_out_logs.append("\n\n")
+                raw_ed_out_logs.append(raw_ed_out_log)
+                raw_ed_out_logs.append("\n\n")
                 if omit_log is not None:
-                    ed_out_logs.extend(omit_log)
+                    raw_ed_out_logs.extend(omit_log)
+
+                final_ed_out_logs = list(final_ed_per_out_log)
+                final_ed_out_logs.append("\n\n")
+                final_ed_out_logs.append(final_ed_out_log)
+                final_ed_out_logs.append("\n\n")
+                if omit_log is not None:
+                    final_ed_out_logs.extend(omit_log)
 
                 with open(os.path.join(self.save_dir, log_dir, "action_segmentation.txt"), "w") as fp:
                     fp.writelines(as_out_logs)
                 with open(os.path.join(self.save_dir, log_dir, "error_recognition.txt"), "w") as fp:
                     fp.writelines(er_out_logs)
+                with open(os.path.join(self.save_dir, log_dir, "error_detection_raw.txt"), "w") as fp:
+                    fp.writelines(raw_ed_out_logs)
+                with open(os.path.join(self.save_dir, log_dir, "error_detection_final.txt"), "w") as fp:
+                    fp.writelines(final_ed_out_logs)
                 with open(os.path.join(self.save_dir, log_dir, "error_detection.txt"), "w") as fp:
-                    fp.writelines(ed_out_logs)
+                    fp.writelines(final_ed_out_logs)
 
                 if self.writer is not None:
                     self.writer.add_scalar("AS_F1@0.500/valid", as_out["F1@0.500"] * 100, global_step)
                     self.writer.add_scalar("ER_F1@0.500/valid", er_out["F1@0.500"] * 100, global_step)
-                    self.writer.add_scalar("ED_F1@0.500/valid", ed_out["F1@0.500"] * 100, global_step)
+                    self.writer.add_scalar("ED_RAW_F1@0.500/valid", raw_ed_out["F1@0.500"] * 100, global_step)
+                    self.writer.add_scalar("ED_FINAL_F1@0.500/valid", final_ed_out["F1@0.500"] * 100, global_step)
                     self.writer.add_scalar("AVG_ER_F1/valid", er_avg_f1, global_step)
-                    self.writer.add_scalar("AVG_ED_F1/valid", ed_avg_f1, global_step)
+                    self.writer.add_scalar("AVG_ED_RAW_F1/valid", raw_ed_avg_f1, global_step)
+                    self.writer.add_scalar("AVG_ED_FINAL_F1/valid", final_ed_avg_f1, global_step)
 
                     if self.use_new_erm and len(erm_log_buffer) > 0:
                         keys = erm_log_buffer[0].keys()
@@ -1293,4 +1316,4 @@ class Runner:
 
             self.model.train()
             print("Evalutation Done...")
-            return (as_avg_f1 + ed_avg_f1 + er_avg_f1) / 3
+            return (as_avg_f1 + final_ed_avg_f1 + er_avg_f1) / 3

@@ -1,3 +1,5 @@
+# src/erm/soft_erm.py
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -9,12 +11,13 @@ import torch.nn.functional as F
 
 class SoftCandidateERM(nn.Module):
     """
-    Inference-only ERM v2:
+    ERM v1.5 / v2 hybrid:
       - multi-candidate soft step conditioning
       - memory-enhanced query
-      - prototype-based joint similarity aggregation
-
-    Inputs are packed in a dict by Runner.
+      - explicit addition branch
+      - dual ED outputs:
+          * raw ED   : GTG2Vid_1 raw error mask
+          * final ED : type-driven + temporal smoothing
     """
 
     def __init__(
@@ -23,7 +26,7 @@ class SoftCandidateERM(nn.Module):
         addition_idx: int,
         num_types: int,
         step_prototypes: torch.Tensor,      # [S, D]
-        error_prototypes: torch.Tensor,     # [S, M, D]
+        error_prototypes: torch.Tensor,     # [S, M, D]  (normally excludes Addition)
         step_node_ids: Sequence[int],       # len S
         type_ids: Sequence[int],            # len M, actual error type ids
         rho: float = 0.85,
@@ -37,6 +40,16 @@ class SoftCandidateERM(nn.Module):
         lambda_obs: float = 0.3,
         similarity_scale: float = 20.0,
         smooth_window: int = 5,
+
+        # explicit addition branch
+        addition_bias: float = -1.5,
+        lambda_add_bg: float = 2.5,
+        lambda_add_fallback: float = 1.2,
+        lambda_add_lowconf: float = 1.0,
+        lambda_add_entropy: float = 0.8,
+        lambda_add_mismatch: float = 2.0,
+        addition_scale: float = 2.0,
+
         eps: float = 1e-8,
     ):
         super().__init__()
@@ -59,6 +72,15 @@ class SoftCandidateERM(nn.Module):
 
         self.similarity_scale = float(similarity_scale)
         self.smooth_window = int(smooth_window)
+
+        self.addition_bias = float(addition_bias)
+        self.lambda_add_bg = float(lambda_add_bg)
+        self.lambda_add_fallback = float(lambda_add_fallback)
+        self.lambda_add_lowconf = float(lambda_add_lowconf)
+        self.lambda_add_entropy = float(lambda_add_entropy)
+        self.lambda_add_mismatch = float(lambda_add_mismatch)
+        self.addition_scale = float(addition_scale)
+
         self.eps = float(eps)
 
         step_node_ids_t = torch.as_tensor(step_node_ids, dtype=torch.long)
@@ -111,6 +133,33 @@ class SoftCandidateERM(nn.Module):
         x = F.pad(x, (left, right), mode="replicate")
         x = F.max_pool1d(x, kernel_size=self.smooth_window, stride=1)
         return x.squeeze(0)
+
+    def _binary_max_filter(self, binary_t: torch.Tensor) -> torch.Tensor:
+        """
+        binary_t: [T] in {0,1}
+        """
+        if self.smooth_window <= 1:
+            return binary_t.long()
+
+        left = self.smooth_window // 2
+        right = self.smooth_window - 1 - left
+
+        x = binary_t.float().view(1, 1, -1)
+        x = F.pad(x, (left, right), mode="replicate")
+        x = F.max_pool1d(x, kernel_size=self.smooth_window, stride=1)
+        return x.view(-1).long()
+
+    def _normalized_entropy(self, probs: torch.Tensor) -> torch.Tensor:
+        """
+        probs: [K]
+        returns scalar in [0,1]
+        """
+        probs = probs.clamp_min(self.eps)
+        ent = -(probs * probs.log()).sum()
+        max_ent = torch.log(
+            torch.tensor(float(max(int(probs.numel()), 2)), device=probs.device)
+        )
+        return ent / max_ent.clamp_min(self.eps)
 
     def _resolve_anchor_node(
         self,
@@ -241,7 +290,9 @@ class SoftCandidateERM(nn.Module):
             if flag & 4:
                 score = score + self.lambda_nb
             if coverage_t is not None:
-                score = score + self.lambda_cov * (1.0 - coverage_t[local_idx].clamp(0.0, 1.0))
+                score = score + self.lambda_cov * (
+                    1.0 - coverage_t[local_idx].clamp(0.0, 1.0)
+                )
 
             raw_scores.append(score)
             flags.append(flag)
@@ -256,6 +307,59 @@ class SoftCandidateERM(nn.Module):
 
         weights = torch.softmax(raw_scores_t, dim=0)
         return candidate_locals, weights, flags
+
+    def _compute_addition_score(
+        self,
+        raw_anchor_node: int,
+        is_fallback: bool,
+        alpha_t: torch.Tensor,               # [S]
+        candidate_weights: torch.Tensor,     # [K]
+        agg_scores: torch.Tensor,            # [M]
+    ) -> torch.Tensor:
+        """
+        Explicit Addition branch.
+        We do NOT assume step-specific Addition prototypes exist.
+        """
+
+        anchor_bg_flag = 1.0 if int(raw_anchor_node) == self.bg_idx else 0.0
+        fallback_flag = 1.0 if bool(is_fallback) else 0.0
+
+        alpha_top1 = alpha_t.max()
+        alpha_lowconf = 1.0 - alpha_top1
+        alpha_entropy = self._normalized_entropy(alpha_t)
+
+        if candidate_weights.numel() > 0:
+            cand_entropy = self._normalized_entropy(candidate_weights)
+        else:
+            cand_entropy = torch.tensor(0.0, device=alpha_t.device, dtype=alpha_t.dtype)
+
+        if agg_scores.numel() > 0:
+            best_step_err_score = agg_scores.max()
+        else:
+            best_step_err_score = torch.tensor(0.0, device=alpha_t.device, dtype=alpha_t.dtype)
+
+        mismatch = 1.0 - best_step_err_score
+
+        add_logit = (
+            self.addition_bias
+            + self.lambda_add_bg * anchor_bg_flag
+            + self.lambda_add_fallback * fallback_flag
+            + self.lambda_add_lowconf * alpha_lowconf
+            + self.lambda_add_entropy * 0.5 * (alpha_entropy + cand_entropy)
+            + self.lambda_add_mismatch * mismatch
+        )
+
+        add_score = torch.sigmoid(self.addition_scale * add_logit)
+
+        # Keep compatibility with the original design intuition:
+        # if no-drop anchor lands on BG, Addition should be highly favored.
+        if int(raw_anchor_node) == self.bg_idx:
+            add_score = torch.maximum(
+                add_score,
+                torch.tensor(0.95, device=alpha_t.device, dtype=alpha_t.dtype),
+            )
+
+        return add_score
 
     def forward(self, erm_inputs: Dict[str, object]):
         pred, type_pred, error_pred, _ = self.forward_with_aux(erm_inputs)
@@ -295,10 +399,11 @@ class SoftCandidateERM(nn.Module):
         tlen = int(pred_t.shape[0])
         num_err_proto = int(self.type_ids.numel())
 
-        error_mask = pred_t == -1
+        raw_error_mask = pred_t == -1
 
+        # score tensor over all type ids: [0..num_types]
         type_scores = torch.zeros(self.num_types + 1, tlen, device=device, dtype=torch.float32)
-        type_scores[0, ~error_mask] = 1.0
+        type_scores[0, :] = 1.0  # default normal
 
         candidate_ids_seq = torch.full(
             (tlen, self.kmax_final), -1, dtype=torch.long, device=device
@@ -324,9 +429,15 @@ class SoftCandidateERM(nn.Module):
             (tlen, self.num_types + 1), dtype=torch.float32, device=device
         )
 
+        addition_score_seq = torch.zeros((tlen,), dtype=torch.float32, device=device)
+
         for t in range(tlen):
-            if not bool(error_mask[t].item()):
+            if not bool(raw_error_mask[t].item()):
+                aggregated_scores_seq[t, 0] = 1.0
                 continue
+
+            # once raw error, normal channel should no longer dominate this frame
+            type_scores[0, t] = 0.0
 
             alpha_t = step_posteriors[t]  # [S]
             coverage_t = coverage_trace_seq[t] if coverage_trace_seq is not None else None
@@ -390,13 +501,22 @@ class SoftCandidateERM(nn.Module):
                 candidate_flags_seq[t, rank] = int(flag)
                 joint_scores_seq[t, rank, :] = score_vec
 
-            if torch.max(agg_scores) <= self.eps:
-                if 0 < self.addition_idx <= self.num_types:
-                    type_scores[self.addition_idx, t] = 1.0
-            else:
-                for proto_col, type_id in enumerate(self.type_ids.tolist()):
-                    if 0 < int(type_id) <= self.num_types:
-                        type_scores[int(type_id), t] = agg_scores[proto_col]
+            # existing prototype-backed types
+            for proto_col, type_id in enumerate(self.type_ids.tolist()):
+                if 0 < int(type_id) <= self.num_types:
+                    type_scores[int(type_id), t] = agg_scores[proto_col]
+
+            # explicit Addition branch
+            if 0 < self.addition_idx <= self.num_types:
+                add_score = self._compute_addition_score(
+                    raw_anchor_node=raw_anchor_node,
+                    is_fallback=is_fallback,
+                    alpha_t=alpha_t,
+                    candidate_weights=candidate_weights,
+                    agg_scores=agg_scores,
+                )
+                type_scores[self.addition_idx, t] = add_score
+                addition_score_seq[t] = add_score
 
             candidate_count_seq[t] = len(candidate_locals)
             anchor_step_seq[t] = anchor_node_id
@@ -410,20 +530,29 @@ class SoftCandidateERM(nn.Module):
 
             aggregated_scores_seq[t, :] = type_scores[:, t]
 
+        # smooth non-normal channels only
         smoothed_scores = type_scores.clone()
         if self.smooth_window > 1:
             smoothed_scores[1:, :] = self._max_filter_1d(type_scores[1:, :])
 
-        type_pred = torch.argmax(smoothed_scores, dim=0)
-        type_pred[~error_mask] = 0
+        # strict type pred: only valid on raw error frames
+        strict_type_pred = torch.argmax(smoothed_scores, dim=0)
+        strict_type_pred[~raw_error_mask] = 0
 
-        # force every predicted error frame to keep a non-normal type
-        fallback_normal_mask = error_mask & (type_pred == 0)
+        fallback_normal_mask = raw_error_mask & (strict_type_pred == 0)
         if torch.any(fallback_normal_mask):
-            type_pred[fallback_normal_mask] = self.addition_idx
+            strict_type_pred[fallback_normal_mask] = self.addition_idx
 
-        # ED stays owned by GTG2Vid in v1 ERM
-        error_pred = error_mask.long()
+        # final type pred: keep temporal spillover, closer to the original design
+        final_type_pred = torch.argmax(smoothed_scores, dim=0)
+
+        fallback_normal_mask_final = raw_error_mask & (final_type_pred == 0)
+        if torch.any(fallback_normal_mask_final):
+            final_type_pred[fallback_normal_mask_final] = self.addition_idx
+
+        raw_error_pred = raw_error_mask.long()
+        final_error_pred = (final_type_pred > 0).long()
+        final_error_pred = self._binary_max_filter(final_error_pred)
 
         aux = {
             "candidate_ids_seq": candidate_ids_seq.detach().cpu(),
@@ -436,13 +565,22 @@ class SoftCandidateERM(nn.Module):
             "joint_scores_seq": joint_scores_seq.detach().cpu(),
             "aggregated_scores_seq": aggregated_scores_seq.detach().cpu(),
             "smoothed_scores_seq": smoothed_scores.transpose(0, 1).detach().cpu(),
+            "addition_score_seq": addition_score_seq.detach().cpu(),
+            "raw_error_pred_seq": raw_error_pred.detach().cpu(),
+            "final_error_pred_seq": final_error_pred.detach().cpu(),
+            "strict_type_pred_seq": strict_type_pred.detach().cpu(),
+            "final_type_pred_seq": final_type_pred.detach().cpu(),
             "type_ids": self.type_ids.detach().cpu(),
             "step_node_ids": self.step_node_ids.detach().cpu(),
         }
 
+        # legacy compatibility:
+        # pred      -> GTG2Vid_1 path
+        # type_pred -> final type pred
+        # error_pred-> final ED
         return (
             pred_t.detach().cpu().numpy(),
-            type_pred.detach().cpu().numpy(),
-            error_pred.detach().cpu().numpy(),
+            final_type_pred.detach().cpu().numpy(),
+            final_error_pred.detach().cpu().numpy(),
             aux,
         )

@@ -1,0 +1,21 @@
+[semantic] task_dir: /root/autodl-tmp/data/EgoPER/tea
+[semantic] normal_dir: /root/autodl-tmp/data/EgoPER/tea/vc_normal_action_features
+[semantic] error_dir: /root/autodl-tmp/data/EgoPER/tea/vc_chatgpt4omini_error_features
+[semantic] step_prototypes: (10, 256)
+[semantic] error_prototypes: (10, 3, 256)
+[semantic] num_error_types: 3
+[semantic] missing_error_pairs: 0
+Loading Dataset ...
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 370.47it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 369.90it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 405.43it/s]
+Use visual memory: True
+Use semantic memory: True
+Use new ERM: True
+Backbone LR: 5e-05, VM LR: 0.0001
+Ignore specific or non-exsting action type for error recognition: ['Normal']
+Load from epoch 3
+Num of valid omitted sequences: 32
+Evalutation Done...
