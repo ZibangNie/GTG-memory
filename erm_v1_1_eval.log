@@ -6,11 +6,11 @@
 [semantic] num_error_types: 3
 [semantic] missing_error_pairs: 0
 Loading Dataset ...
-  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 370.47it/s]
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 569.39it/s]
 Loading Dataset ...
-  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 369.90it/s]
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 505.66it/s]
 Loading Dataset ...
-  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 405.43it/s]
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 601.55it/s]
 Use visual memory: True
 Use semantic memory: True
 Use new ERM: True
