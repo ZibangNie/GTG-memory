@@ -484,8 +484,7 @@ class Runner:
         for video_idx, data in enumerate(self.test_loader):
             v_feature, label, type_label, video = data
             type_label = type_label.squeeze(0)
-            for idx in range(self.num_types):
-                action_type = idx + 1
+            for action_type in range(self.num_types + 1):  # 包含 0=Normal
                 if action_type not in exist_type and (type_label == action_type).sum() > 0:
                     exist_type.append(action_type)
 
