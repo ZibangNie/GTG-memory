@@ -90,3 +90,9 @@ secrets/
 
 /data/
 
+
+# ignore generated output dirs under exp_update
+exp_update/**/output/
+
+# ignore generated output dirs under exp_update
+exp_update/**/output/
