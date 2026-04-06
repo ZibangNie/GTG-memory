@@ -14,7 +14,6 @@
   "batch_size": 2,
   "learning_rate": 0.0001,
   "weight_decay": 0.0001,
-  "num_epochs": 3,
   "log_freq": 10,
   "ignore_idx": -100,
   "num_iterations": 100,
@@ -47,6 +46,9 @@
   "semantic_feature_dim": 256,
   "runs_dir": "exp_update/runs",
   "dump_debug_aux": true,
-  "debug_dump_max_videos": -1,
-  "use_new_erm": false
+  "use_new_erm": false,
+  "node_drop_base": 0,
+  "num_epochs": 1,
+  "debug_dump_max_videos": 2,
+  "dump_full_debug_tensors": false
 }
