@@ -27,6 +27,8 @@ Thumbs.db
 # Logs
 logs/
 *.log
+events.out.tfevents.*
+
 
 # Temporary / cache
 tmp/
@@ -45,10 +47,12 @@ processed_data/
 weights/
 checkpoints/
 ckpts/
+
 pretrained/
 *.pt
 *.pth
-*.ckpt
+
+
 *.bin
 *.safetensors
 *.onnx
@@ -63,11 +67,10 @@ pretrained/
 
 # Experiment outputs
 runs/
-outputs/
-results/
-wandb/
-tensorboard/
-events.out.tfevents.*
+exp_update/runs/
+exp_update/ckpts/
+exp_update/**/output/
+
 
 # Archives
 *.zip
@@ -91,14 +94,4 @@ secrets/
 *.pem
 *.jsonl.bak
 # GTG-memory data and weights
-/ckpts/
-/runs/
-/logs/
 /data/
-/models/
-*.pth
-*.pt
-*.ckpt
-*.safetensors
-*.npy
-*.npz

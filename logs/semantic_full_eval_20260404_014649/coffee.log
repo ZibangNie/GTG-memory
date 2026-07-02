@@ -1,0 +1,25 @@
+[semantic] task_dir: /root/autodl-tmp/data/EgoPER/coffee
+[semantic] normal_dir: /root/autodl-tmp/data/EgoPER/coffee/vc_normal_action_features
+[semantic] error_dir: /root/autodl-tmp/data/EgoPER/coffee/vc_chatgpt4omini_error_features
+[semantic] step_prototypes: (15, 256)
+[semantic] error_prototypes: (15, 3, 256)
+[semantic] num_error_types: 3
+[semantic] missing_error_pairs: 0
+Loaded pretrained backbone from: ckpts/EgoPER/coffee/best/best_checkpoint.pth
+Loaded trunk params: 100
+Loading Dataset ...
+  0%|          | 0/27 [00:00<?, ?it/s] 67%|██████▋   | 18/27 [00:00<00:00, 175.60it/s]100%|██████████| 27/27 [00:00<00:00, 199.72it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 210.93it/s]
+Loading Dataset ...
+  0%|          | 0/38 [00:00<?, ?it/s] 50%|█████     | 19/38 [00:00<00:00, 187.13it/s]100%|██████████| 38/38 [00:00<00:00, 192.09it/s]
+Use visual memory: True
+Use semantic memory: True
+Backbone LR: 5e-05, VM LR: 0.0001
+Ignore specific or non-exsting action type for error recognition: ['Normal', 'Error_Addition']
+Epoch: [1/5], Iter: [10/100] action_ce_loss:1.696	
+Epoch: [1/5], Iter: [20/100] action_ce_loss:0.960	
+Epoch: [1/5], Iter: [30/100] action_ce_loss:0.657	
+Epoch: [1/5], Iter: [40/100] action_ce_loss:0.552	
+Epoch: [1/5], Iter: [50/100] action_ce_loss:0.351	
+Epoch: [1/5], Iter: [60/100] action_ce_loss:0.380	

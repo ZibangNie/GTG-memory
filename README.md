@@ -1,3 +1,18 @@
+# GTG-memory
+
+GTG-memory is a research prototype that extends the official GTG/GTG2Vid procedural-video error-recognition pipeline with visual memory, semantic memory, and an experimental soft-candidate ERM.
+
+Current cleanup notes:
+
+- The active research branch is `ERM_update` / `codex/organize-gtg-memory`, not the original upstream-style `main`.
+- The most useful project recap is in `docs/project_recap.md`.
+- The code-reading map is in `docs/code_structure.md`.
+- The current experiment summary is in `docs/experiments_summary.md`.
+- Visual memory has the cleanest evidence: small gains on TAS and omission IoU.
+- Semantic memory and soft ERM are implemented but not yet stable enough to claim final improvement.
+
+The rest of this README preserves the upstream GTG implementation notes for environment setup and baseline usage.
+
 # Error Recognition in Procedural Videos using Generalized Task Graph
 
 - [Preparation](#Preparation)
@@ -90,7 +105,7 @@ Create a data/ folder with the following structure and move data/labels accordin
 ### Update configuration
 Please update the configuration file accordingly (e.g., configs/EgoPER/tea/vc_4omini_post_db0.6.json)
 - For EgoPER, set the value of key 'root_data_dir' to data/EgoPER
-- For CaptainCook4D, set the value of key 'root_data_dir' to data/CaptainCook4D 
+- For CaptainCook4D, set the value of key 'root_data_dir' to data/CaptainCook4D
 
 ## Training
 - EgoPER
@@ -105,7 +120,7 @@ Please update the configuration file accordingly (e.g., configs/EgoPER/tea/vc_4o
 
 ## Evaluation
 - Specify the ```--dir```
-    - e.g., 
+    - e.g.,
     ```
     python main.py --config configs/EgoPER/tea/vc_4omini_post_db0.6.json --dir best --eval --vis
     ```

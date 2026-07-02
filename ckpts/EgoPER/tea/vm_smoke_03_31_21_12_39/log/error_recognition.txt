@@ -1,0 +1,65 @@
+|       Action       |Precision@0.000| Recall@0.000  | F1@0.000 |
+|   Error_Addition   |     16.9      |     87.5      |   28.4   |
+|  Error_Correction  |      4.2      |     25.0      |   7.2    |
+|     Error_Slip     |      3.9      |     38.1      |   7.1    |
+|       Normal       |     51.4      |     82.6      |   63.4   |
+| Error_Modification |     18.8      |     42.9      |   26.1   |
+
+Ignore action: Normal, 
+Avg F1@0.000: 17.2
+
+| All Precision |  All Recall   |    All F1     |All w-F1@0.000 |     EAcc      |
+|     10.5      |     55.5      |     17.7      |     17.7      |     100.0     |
+
+|       Action       |Precision@0.010| Recall@0.010  | F1@0.010 |
+|   Error_Addition   |      7.3      |     75.0      |   13.2   |
+|  Error_Correction  |      4.2      |     25.0      |   7.2    |
+|     Error_Slip     |      3.9      |     33.3      |   7.0    |
+|       Normal       |     53.7      |     72.3      |   61.6   |
+| Error_Modification |     13.8      |     31.4      |   19.1   |
+
+Ignore action: Normal, 
+Avg F1@0.010: 11.6
+
+| All Precision |  All Recall   |    All F1     |All w-F1@0.010 |     EAcc      |
+|      6.4      |     40.2      |     11.0      |     11.0      |     100.0     |
+
+|       Action       |Precision@0.100| Recall@0.100  | F1@0.100 |
+|   Error_Addition   |      4.8      |     50.0      |   8.8    |
+|  Error_Correction  |      4.2      |     25.0      |   7.2    |
+|     Error_Slip     |      2.0      |     16.7      |   3.5    |
+|       Normal       |     50.9      |     68.5      |   58.4   |
+| Error_Modification |      7.5      |     17.1      |   10.4   |
+
+Ignore action: Normal, 
+Avg F1@0.100: 7.5
+
+| All Precision |  All Recall   |    All F1     |All w-F1@0.100 |     EAcc      |
+|      4.1      |     26.2      |      7.2      |      7.2      |     100.0     |
+
+|       Action       |Precision@0.250| Recall@0.250  | F1@0.250 |
+|   Error_Addition   |      2.4      |     25.0      |   4.4    |
+|  Error_Correction  |      2.1      |     12.5      |   3.6    |
+|     Error_Slip     |      1.0      |      8.3      |   1.7    |
+|       Normal       |     45.7      |     61.5      |   52.5   |
+| Error_Modification |      3.8      |      8.6      |   5.2    |
+
+Ignore action: Normal, 
+Avg F1@0.250: 3.7
+
+| All Precision |  All Recall   |    All F1     |All w-F1@0.250 |     EAcc      |
+|      2.1      |     13.1      |      3.6      |      3.6      |     100.0     |
+
+|       Action       |Precision@0.500| Recall@0.500  | F1@0.500 |
+|   Error_Addition   |      1.6      |     16.7      |   2.9    |
+|  Error_Correction  |      1.4      |      8.3      |   2.4    |
+|     Error_Slip     |      0.5      |      4.2      |   0.9    |
+|       Normal       |     21.7      |     29.2      |   24.9   |
+| Error_Modification |      0.0      |      0.0      |   0.0    |
+
+Ignore action: Normal, 
+Avg F1@0.500: 1.6
+
+| All Precision |  All Recall   |    All F1     |All w-F1@0.500 |     EAcc      |
+|      1.0      |      6.5      |      1.8      |      1.3      |     75.0      |
+

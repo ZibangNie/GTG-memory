@@ -1,0 +1,39 @@
+|       Action       |Precision@0.000| Recall@0.000  | F1@0.000 |
+|       Error        |     67.7      |     64.9      |   66.3   |
+|       Normal       |     67.3      |     71.2      |   69.2   |
+
+
+Avg F1@0.000: 67.7
+
+|       Action       |Precision@0.010| Recall@0.010  | F1@0.010 |
+|       Error        |     52.7      |     59.0      |   55.7   |
+|       Normal       |     75.5      |     70.3      |   72.8   |
+
+
+Avg F1@0.010: 64.2
+
+|       Action       |Precision@0.100| Recall@0.100  | F1@0.100 |
+|       Error        |     51.6      |     57.8      |   54.5   |
+|       Normal       |     73.6      |     68.6      |   71.1   |
+
+
+Avg F1@0.100: 62.8
+
+|       Action       |Precision@0.250| Recall@0.250  | F1@0.250 |
+|       Error        |     51.6      |     57.8      |   54.5   |
+|       Normal       |     69.1      |     64.4      |   66.7   |
+
+
+Avg F1@0.250: 60.6
+
+|       Action       |Precision@0.500| Recall@0.500  | F1@0.500 |
+|       Error        |     36.6      |     41.0      |   38.6   |
+|       Normal       |     57.3      |     53.4      |   55.3   |
+
+
+Avg F1@0.500: 46.9
+
+
+
+Omission Detecion:
+|oIoU:70.1|oAcc:96.8|

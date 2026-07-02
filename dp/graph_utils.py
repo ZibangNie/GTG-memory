@@ -43,101 +43,39 @@ def compute_generalized_metadag_costs(
     drop_base=1.0,
     node_drop_base=-200
 ):
-    """
-    Parameters
-    """
-
     action_logits = sample["action_logits"]
 
-    action_prob = torch.softmax(action_logits, dim=0).permute(1, 0) # N x K
-
+    action_prob = torch.softmax(action_logits, dim=0).permute(1, 0)  # N x K
     sims = action_prob
     num_frames, num_steps = sims.size()
+    eps = 1e-8
 
-    ############## updated drop cost
-    # use entropy of action probabilities to decide drop cost
-
-    ## no drop 
-    # baseline_logit = torch.tensor([0.0])
-    # drop_logits = baseline_logit.repeat([1, num_frames])
-    # drop_costs = -drop_logits.squeeze()
-
-    ## dynamic drop
-    # baseline_logit = torch.tensor([drop_base])
-    # drop_logits = baseline_logit.repeat([1, num_frames])
-    # drop_costs = -drop_logits.squeeze()
-    # max_drop_cost = torch.tensor([1/(num_steps) for i in range(num_steps)])
-    # max_drop_cost = - torch.sum(max_drop_cost * torch.log(max_drop_cost))
-    # drop_costs = drop_costs.to(sims.device)
-    # drop_costs = drop_costs * - torch.sum(sims.to(drop_costs.device) * torch.log(sims.to(drop_costs.device)), dim=1) / max_drop_cost
-
-    ## fixed prob drop
-    # 0.9: most of the frames become errors
-    # 0.5: some background frrames become errors, the slip errors cannot be found
-
-    # debugging
-    # print(sample["video_id"])
-    # zz = sims[sample["label"] == 3]
-    # for i in range(len(zz)):
-    #     print("%.3f"%(zz[i][3]), end=" ")
-    # print()
-
-    # baseline_logit = torch.tensor([drop_base])
-    # drop_logits = baseline_logit.repeat([1, num_frames])  # making it of shape [1, N]
-    # drop_costs = -drop_logits.squeeze()
-    
-    # topk
-    # if drop_base == -100:
-    #     baseline_logit = torch.tensor([0.0])
-    #     drop_logits = baseline_logit.repeat([1, num_frames])  # making it of shape [1, N]
-    #     drop_costs = -drop_logits.squeeze()
-    # else:
-    #     k = max([1, int(torch.numel(sims) * drop_base)])
-    #     baseline_logit = torch.topk(sims.reshape([-1]), k).values[-1].detach()
-    #     drop_logits = baseline_logit.repeat([1, num_frames])  # making it of shape [1, N]
-    #     drop_costs = -drop_logits.squeeze()
-
-    ## dynamic drop version 2
+    # ---------- frame drop cost ----------
     if drop_base == -100:
-        baseline_logit = torch.tensor([0.0])
-        drop_logits = baseline_logit.repeat([1, num_frames])  # making it of shape [1, N]
+        baseline_logit = torch.tensor([0.0], device=sims.device, dtype=sims.dtype)
+        drop_logits = baseline_logit.repeat([1, num_frames])
         drop_costs = -drop_logits.squeeze()
     else:
-        max_drop_cost = torch.tensor([1/(num_steps) for i in range(num_steps)])#.to(sims.device)
-        max_drop_cost = - torch.sum(max_drop_cost * torch.log(max_drop_cost))
-        drop_costs = - torch.sum(sims * torch.log(sims), dim=1) / max_drop_cost
-        drop_costs = - (drop_costs + drop_base)
+        uniform = torch.full((num_steps,), 1.0 / num_steps, device=sims.device, dtype=sims.dtype)
+        max_drop_cost = -(uniform * torch.log(uniform.clamp_min(eps))).sum()
 
-    # print("debug in graph_utils")
-    # every frame drops
+        entropy = -(sims.clamp_min(eps) * torch.log(sims.clamp_min(eps))).sum(dim=1)
+        norm_entropy = entropy / max_drop_cost.clamp_min(eps)
 
-    # print(sample["video_id"])
-    # spe_sim = sims[sample["label"] == 3]
-    # spe_drop = drop_costs[sample["label"] == 3]
-    # for i in range(len(spe_sim)):
-    #     print("%.3f, %.3f/"%(spe_sim[i][3], spe_drop[i]), end=" ")
-    # print()
-    
-    ############### updated node drop cost
-    ### use highest action probability across frames to decide node drop cost
+        drop_costs = -(norm_entropy + drop_base)
 
-    ## no node drop
-    # node_base_logits = torch.tensor([-200])
-    # node_drop_logits = node_base_logits.repeat([num_steps])
-    # node_drop_costs = -node_drop_logits
-
-    # ## dynamic node drop
-    node_base_logits = torch.tensor([node_drop_base])
+    # ---------- node drop cost ----------
+    node_base_logits = torch.tensor([node_drop_base], device=sims.device, dtype=sims.dtype)
     node_drop_logits = node_base_logits.repeat([num_steps])
     node_drop_costs = -node_drop_logits
-    # values, _ = torch.topk(sims[:, :].to(node_drop_costs.device), 1, dim=0, largest=True)
+
     values, _ = torch.topk(sims[:, :], 1, dim=0, largest=True)
     node_drop_costs = node_drop_costs * (1 - values)
     node_drop_costs = node_drop_costs.squeeze(0)
 
     active_nodes = np.array([int(float(v.split(",")[0])) for v in idx2node.values()])
 
-    meta_zx_costs = -sims.permute(1, 0).unsqueeze(0) # M = 1 x K x N
+    meta_zx_costs = -sims.permute(1, 0).unsqueeze(0)  # 1 x K x N
     zx_costs = meta_zx_costs[:, active_nodes, :]
     return zx_costs, drop_costs, node_drop_costs[active_nodes]
 

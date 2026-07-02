@@ -19,13 +19,20 @@ import networkx as nx
 from networkx.algorithms.dag import lexicographical_topological_sort
 
 from models.models import ASDiffusionBackbone
+from utils.semantic_prototype_loader import load_task_semantic_prototypes
 
 from datasets.gtg_dataset_loader import get_data_dict, VideoDataset
 
+from utils.debug_dump import (
+    dump_erm_debug_json as write_erm_debug_json,
+    dump_model_debug_json as write_model_debug_json,
+)
 from utils.metrics import Video, Checkpoint, omission_detection
 from utils.utils import draw_pred, create_image_grid
 
 from dp.graph_utils import compute_generalized_metadag_costs, generalized_metadag2vid
+
+from src.erm import SoftCandidateERM
 
 np.random.seed(0)
 random.seed(0)
@@ -154,6 +161,10 @@ class Runner:
         dataset_name = all_params["dataset_name"]
         input_dim = all_params["input_dim"]
 
+        self.root_data_dir = root_data_dir
+        self.input_dim = input_dim
+        self.simple_error_path = all_params.get("simple_error_path", "vc_chatgpt4omini_error_features")
+
         self.naming = all_params["naming"]
         self.lr = all_params["learning_rate"]
         self.weight_decay = all_params["weight_decay"]
@@ -167,9 +178,37 @@ class Runner:
         self.is_vis = args.vis
         self.is_training = not args.eval
         self.dataset_name = dataset_name
+        self._configure_debug_dump(args, all_params)
 
         # visual-memory config
         self.use_visual_memory = all_params.get("use_visual_memory", False)
+        self.use_semantic_memory = all_params.get("use_semantic_memory", False)
+
+        self.semantic_short_dim = all_params.get("semantic_short_dim", 256)
+        self.semantic_long_dim = all_params.get("semantic_long_dim", 384)
+        self.semantic_uncertainty_dim = all_params.get("semantic_uncertainty_dim", 32)
+        self.semantic_long_write_cap = all_params.get("semantic_long_write_cap", 0.2)
+
+        self.semantic_tau_step = all_params.get("semantic_tau_step", 0.07)
+        self.semantic_tau_err = all_params.get("semantic_tau_err", 0.07)
+        self.semantic_rho_err = all_params.get("semantic_rho_err", 0.85)
+        self.semantic_error_candidate_max_k = all_params.get("semantic_error_candidate_max_k", 5)
+
+        self.semantic_topo_lambda_self = all_params.get("semantic_topo_lambda_self", 1.0)
+        self.semantic_topo_lambda_succ = all_params.get("semantic_topo_lambda_succ", 0.8)
+        self.semantic_topo_lambda_pred = all_params.get("semantic_topo_lambda_pred", 0.4)
+        self.semantic_topo_lambda_total = all_params.get("semantic_topo_lambda_total", 0.5)
+
+        self.semantic_feature_dir = all_params.get("semantic_feature_dir", "vc_normal_action_features")
+        self.semantic_error_feature_dir = all_params.get(
+            "semantic_error_feature_dir",
+            all_params.get("simple_error_path", "vc_chatgpt4omini_error_features"),
+        )
+        self.semantic_feature_dim = all_params.get("semantic_feature_dim", self.input_dim)
+
+        self.semantic_proto_payload = None
+        self.erm_module = None
+
         self.short_dim = all_params.get("short_dim", 256)
         self.long_dim = all_params.get("long_dim", 384)
         self.fusion_dim = all_params.get("fusion_dim", 256)
@@ -177,7 +216,24 @@ class Runner:
         self.fusion_dropout = all_params.get("fusion_dropout", 0.1)
         self.pretrained_backbone_ckpt = all_params.get("pretrained_backbone_ckpt", "")
 
-        if self.use_visual_memory:
+        # ERM v2 config
+        self.use_new_erm = all_params.get("use_new_erm", False)
+        self.erm_rho = all_params.get("erm_rho", 0.85)
+        self.erm_kmax_sem = all_params.get("erm_kmax_sem", 5)
+        self.erm_kmax_final = all_params.get("erm_kmax_final", 6)
+
+        self.erm_lambda_anchor = all_params.get("erm_lambda_anchor", 0.8)
+        self.erm_lambda_nb = all_params.get("erm_lambda_nb", 0.3)
+        self.erm_lambda_cov = all_params.get("erm_lambda_cov", 0.2)
+
+        self.erm_lambda_vis = all_params.get("erm_lambda_vis", 0.5)
+        self.erm_lambda_sem = all_params.get("erm_lambda_sem", 0.7)
+        self.erm_lambda_obs = all_params.get("erm_lambda_obs", 0.3)
+
+        self.erm_similarity_scale = all_params.get("erm_similarity_scale", 20.0)
+        self.erm_smooth_window = all_params.get("erm_smooth_window", 5)
+
+        if self.use_visual_memory or self.use_semantic_memory:
             self.backbone_lr = all_params.get("backbone_learning_rate", 5e-5)
             self.vm_lr = all_params.get("vm_learning_rate", 1e-4)
         else:
@@ -231,6 +287,16 @@ class Runner:
             device=self.device,
             bg_w=all_params["background_weight"],
             use_visual_memory=self.use_visual_memory,
+            use_semantic_memory=self.use_semantic_memory,
+            uncertainty_dim=self.semantic_uncertainty_dim,
+            tau_step=self.semantic_tau_step,
+            tau_err=self.semantic_tau_err,
+            rho_err=self.semantic_rho_err,
+            error_candidate_max_k=self.semantic_error_candidate_max_k,
+            topo_lambda_self=self.semantic_topo_lambda_self,
+            topo_lambda_succ=self.semantic_topo_lambda_succ,
+            topo_lambda_pred=self.semantic_topo_lambda_pred,
+            topo_lambda_total=self.semantic_topo_lambda_total,
             short_dim=self.short_dim,
             long_dim=self.long_dim,
             fusion_dim=self.fusion_dim,
@@ -238,11 +304,60 @@ class Runner:
             fusion_dropout=self.fusion_dropout,
         )
         self.model.to(self.device)
-        if self.use_visual_memory and self.pretrained_backbone_ckpt:
+
+        if self.use_semantic_memory:
+            self.semantic_proto_payload = load_task_semantic_prototypes(
+                root_data_dir=self.root_data_dir,
+                dataset_name=self.dataset_name,
+                feature_dim=self.semantic_feature_dim,
+                normal_dir_name=self.semantic_feature_dir,
+                error_dir_name=self.semantic_error_feature_dir,
+            )
+
+            self.model.configure_semantic_prototypes(
+                step_prototypes=self.semantic_proto_payload["step_prototypes"].to(self.device),
+                error_prototypes=self.semantic_proto_payload["error_prototypes"].to(self.device),
+                step_node_ids=self.semantic_proto_payload["step_node_ids"],
+                predecessor_edges=self.semantic_proto_payload["predecessor_edges"],
+            )
+
+            if self.use_new_erm:
+                self.erm_module = SoftCandidateERM(
+                    bg_idx=self.bg_idx,
+                    addition_idx=self.addition_idx,
+                    num_types=self.num_types,
+                    step_prototypes=self.semantic_proto_payload["step_prototypes"],
+                    error_prototypes=self.semantic_proto_payload["error_prototypes"],
+                    step_node_ids=self.semantic_proto_payload["step_node_ids"],
+                    type_ids=self.semantic_proto_payload["type_ids"],
+                    rho=self.erm_rho,
+                    kmax_sem=self.erm_kmax_sem,
+                    kmax_final=self.erm_kmax_final,
+                    lambda_anchor=self.erm_lambda_anchor,
+                    lambda_nb=self.erm_lambda_nb,
+                    lambda_cov=self.erm_lambda_cov,
+                    lambda_vis=self.erm_lambda_vis,
+                    lambda_sem=self.erm_lambda_sem,
+                    lambda_obs=self.erm_lambda_obs,
+                    similarity_scale=self.erm_similarity_scale,
+                    smooth_window=self.erm_smooth_window,
+                ).to(self.device)
+
+            print("[semantic] task_dir:", self.semantic_proto_payload["task_dir"])
+            print("[semantic] normal_dir:", self.semantic_proto_payload["normal_dir"])
+            print("[semantic] error_dir:", self.semantic_proto_payload["error_dir"])
+            print("[semantic] step_prototypes:", tuple(self.semantic_proto_payload["step_prototypes"].shape))
+            print("[semantic] error_prototypes:", tuple(self.semantic_proto_payload["error_prototypes"].shape))
+            print("[semantic] num_error_types:", self.semantic_proto_payload["num_error_types"])
+            print("[semantic] missing_error_pairs:", len(self.semantic_proto_payload["missing_error_pairs"]))
+
+        if self.use_new_erm and not self.use_semantic_memory:
+            raise ValueError("use_new_erm=True requires use_semantic_memory=True")
+
+        if (not args.eval) and (self.use_visual_memory or self.use_semantic_memory) and self.pretrained_backbone_ckpt:
             self._load_pretrained_backbone_if_needed(self.pretrained_backbone_ckpt)
 
-
-        if self.use_visual_memory:
+        if self.use_visual_memory or self.use_semantic_memory:
             backbone_params = [p for p in self.model.backbone_parameters() if p.requires_grad]
             vm_params = [p for p in self.model.visual_memory_parameters() if p.requires_grad]
 
@@ -259,11 +374,32 @@ class Runner:
         dataset_dict = get_datasets(all_params, self.num_classes, self.action2idx, self.actiontype2idx, args.eval)
 
         if args.eval:
-            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
-            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False, num_workers=1)
-            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False, num_workers=1)
-            self.load_dir = os.path.join(self.ckpt_dir, self.naming, dataset_name, args.dir, "best_checkpoint.pth")
-            self.save_dir = os.path.join(self.ckpt_dir, self.naming, dataset_name, args.dir)
+            self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False,
+                                                           num_workers=1)
+            self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False,
+                                                          num_workers=1)
+            self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=False,
+                                                            num_workers=1)
+
+            load_dir_name = args.load_dir if args.load_dir is not None else args.dir
+            save_dir_name = args.save_dir if args.save_dir is not None else load_dir_name
+
+            self.load_dir = os.path.join(
+                self.ckpt_dir,
+                self.naming,
+                dataset_name,
+                load_dir_name,
+                "best_checkpoint.pth",
+            )
+
+            self.save_dir = os.path.join(
+                self.ckpt_dir,
+                self.naming,
+                dataset_name,
+                save_dir_name,
+            )
+            os.makedirs(self.save_dir, exist_ok=True)
+
             self.writer = None
         else:
             self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
@@ -339,9 +475,22 @@ class Runner:
                 self.ignore_actions.append(self.idx2actiontype[str(action_type)])
 
         print("Use visual memory:", self.use_visual_memory)
-        if self.use_visual_memory:
+        print("Use semantic memory:", self.use_semantic_memory)
+        print("Use new ERM:", self.use_new_erm)
+        if self.use_visual_memory or self.use_semantic_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
+
+    def _configure_debug_dump(self, args, all_params):
+        cli_dump_debug = bool(getattr(args, "dump_debug", False))
+        cfg_dump_debug = bool(all_params.get("dump_debug_aux", False))
+        self.dump_debug_aux = cli_dump_debug or cfg_dump_debug
+
+        if cli_dump_debug:
+            self.debug_dump_max_videos = getattr(args, "debug_max_videos", -1)
+        else:
+            self.debug_dump_max_videos = all_params.get("debug_dump_max_videos", -1)
+        self.dump_full_debug_tensors = bool(all_params.get("dump_full_debug_tensors", False))
 
     def _load_pretrained_backbone_if_needed(self, ckpt_path):
         if ckpt_path is None or ckpt_path == "":
@@ -435,49 +584,113 @@ class Runner:
         """
         Compute scalar memory diagnostics from forward_with_aux() outputs.
 
-        base / short / long raw dimensions are not identical, so cosine
-        similarities are computed in the shared fusion space.
+        Supports both:
+        - VisualMemoryScorer
+        - VisualSemanticMemoryScorer
         """
-        if (not self.use_visual_memory) or ("base_seq" not in aux):
+        if (not (self.use_visual_memory or self.use_semantic_memory)) or ("base_seq" not in aux):
             return {}
 
         scorer = self.model.visual_memory_scorer
 
         with torch.no_grad():
             base_seq = aux["base_seq"].detach()
-            short_seq = aux["short_memory_seq"].detach()
-            long_seq = aux["long_memory_seq"].detach()
-            gate_seq = aux["long_write_gate_seq"].detach()
             fused_seq = aux["fused_seq"].detach()
 
+            logs = {}
+
+            # shared quantities
             base_proj = scorer.base_fuse_proj(base_seq)
-            short_proj = scorer.short_fuse_proj(short_seq)
-            long_proj = scorer.long_fuse_proj(long_seq)
-
-            near_cap_threshold = max(self.long_write_cap - 0.02, 0.0)
-
-            # fusion_ratio = ||f_t|| / ||h_base|| where fused = LN(base + delta)
-            # approximate delta in fusion space using projected base
             fusion_delta = fused_seq - base_proj
             fusion_ratio = (
                 fusion_delta.norm(dim=-1).mean() / (base_proj.norm(dim=-1).mean() + 1e-8)
             ).item()
+            logs["MEM/fusion_ratio"] = fusion_ratio
 
-            logs = {
-                "MEM/short_norm": short_seq.norm(dim=-1).mean().item(),
-                "MEM/long_norm": long_seq.norm(dim=-1).mean().item(),
-                "MEM/delta_short": self._temporal_delta_mean(short_seq),
-                "MEM/delta_long": self._temporal_delta_mean(long_seq),
-                "MEM/gate_mean": gate_seq.mean().item(),
-                "MEM/gate_near_zero_ratio": (gate_seq < 0.02).float().mean().item(),
-                "MEM/gate_near_cap_ratio": (gate_seq > near_cap_threshold).float().mean().item(),
-                "MEM/fusion_ratio": fusion_ratio,
-                "MEM/cos_base_short": F.cosine_similarity(base_proj, short_proj, dim=-1).mean().item(),
-                "MEM/cos_base_long": F.cosine_similarity(base_proj, long_proj, dim=-1).mean().item(),
-                "MEM/cos_short_long": F.cosine_similarity(short_proj, long_proj, dim=-1).mean().item(),
-            }
+            # ---------- visual-memory-only style logs ----------
+            if "short_memory_seq" in aux and "long_memory_seq" in aux and "long_write_gate_seq" in aux:
+                short_seq = aux["short_memory_seq"].detach()
+                long_seq = aux["long_memory_seq"].detach()
+                gate_seq = aux["long_write_gate_seq"].detach()
 
-        return logs
+                logs["MEM/short_norm"] = short_seq.norm(dim=-1).mean().item()
+                logs["MEM/long_norm"] = long_seq.norm(dim=-1).mean().item()
+                logs["MEM/delta_short"] = self._temporal_delta_mean(short_seq)
+                logs["MEM/delta_long"] = self._temporal_delta_mean(long_seq)
+                logs["MEM/gate_mean"] = gate_seq.mean().item()
+
+                near_cap_threshold = max(getattr(self, "long_write_cap", 0.2) - 0.02, 0.0)
+                logs["MEM/gate_near_zero_ratio"] = (gate_seq < 0.02).float().mean().item()
+                logs["MEM/gate_near_cap_ratio"] = (gate_seq > near_cap_threshold).float().mean().item()
+
+                # old visual scorer has explicit short/long fuse projectors
+                if hasattr(scorer, "short_fuse_proj") and hasattr(scorer, "long_fuse_proj"):
+                    short_proj = scorer.short_fuse_proj(short_seq)
+                    long_proj = scorer.long_fuse_proj(long_seq)
+                    logs["MEM/cos_base_short"] = F.cosine_similarity(base_proj, short_proj, dim=-1).mean().item()
+                    logs["MEM/cos_base_long"] = F.cosine_similarity(base_proj, long_proj, dim=-1).mean().item()
+                    logs["MEM/cos_short_long"] = F.cosine_similarity(short_proj, long_proj, dim=-1).mean().item()
+
+            # ---------- semantic-memory-specific logs ----------
+            if self.use_semantic_memory:
+                if "sem_short_seq" in aux:
+                    sem_short_seq = aux["sem_short_seq"].detach()
+                    logs["SEM/short_norm"] = sem_short_seq.norm(dim=-1).mean().item()
+                    logs["SEM/delta_short"] = self._temporal_delta_mean(sem_short_seq)
+
+                if "sem_long_seq" in aux:
+                    sem_long_seq = aux["sem_long_seq"].detach()
+                    logs["SEM/long_norm"] = sem_long_seq.norm(dim=-1).mean().item()
+                    logs["SEM/delta_long"] = self._temporal_delta_mean(sem_long_seq)
+
+                if "sem_long_gate_seq" in aux:
+                    sem_long_gate_seq = aux["sem_long_gate_seq"].detach()
+                    logs["SEM/gate_mean"] = sem_long_gate_seq.mean().item()
+
+                    near_cap_threshold = max(getattr(self, "semantic_long_write_cap", 0.2) - 0.02, 0.0)
+                    logs["SEM/gate_near_zero_ratio"] = (sem_long_gate_seq < 0.02).float().mean().item()
+                    logs["SEM/gate_near_cap_ratio"] = (sem_long_gate_seq > near_cap_threshold).float().mean().item()
+
+                if "coverage_trace_seq" in aux:
+                    coverage_seq = aux["coverage_trace_seq"].detach()
+                    logs["SEM/coverage_mean"] = coverage_seq.mean().item()
+                    logs["SEM/coverage_peak"] = coverage_seq.max(dim=-1).values.mean().item()
+
+                if "uncertainty_trace_seq" in aux:
+                    uncertainty_seq = aux["uncertainty_trace_seq"].detach()
+                    logs["SEM/uncertainty_mean"] = uncertainty_seq.mean().item()
+                    logs["SEM/uncertainty_norm"] = uncertainty_seq.norm(dim=-1).mean().item()
+
+                if "semantic_fuse_gate_seq" in aux:
+                    fuse_gate_seq = aux["semantic_fuse_gate_seq"].detach()
+                    logs["SEM/fuse_gate_mean"] = fuse_gate_seq.mean().item()
+                    logs["SEM/fuse_gate_low_ratio"] = (fuse_gate_seq < 0.2).float().mean().item()
+                    logs["SEM/fuse_gate_high_ratio"] = (fuse_gate_seq > 0.8).float().mean().item()
+
+                if "proto_gate" in aux:
+                    proto_gate = aux["proto_gate"].detach()
+                    logs["SEM/proto_gate_mean"] = proto_gate.mean().item()
+                    logs["SEM/proto_gate_low_ratio"] = (proto_gate < 0.2).float().mean().item()
+                    logs["SEM/proto_gate_high_ratio"] = (proto_gate > 0.8).float().mean().item()
+
+                if "step_posteriors" in aux:
+                    alpha = aux["step_posteriors"].detach()
+                    alpha_entropy = -(alpha.clamp_min(1e-8) * alpha.clamp_min(1e-8).log()).sum(dim=-1)
+                    logs["SEM/alpha_entropy"] = alpha_entropy.mean().item()
+                    logs["SEM/alpha_max"] = alpha.max(dim=-1).values.mean().item()
+
+                if "error_posteriors" in aux:
+                    gamma = aux["error_posteriors"].detach()
+                    error_mass = gamma.sum(dim=(-1, -2))
+                    logs["SEM/error_mass_mean"] = error_mass.mean().item()
+
+                if "main_logits" in aux and "final_logits" in aux:
+                    main_logits = aux["main_logits"].detach()
+                    final_logits = aux["final_logits"].detach()
+                    proto_boost = final_logits - main_logits
+                    logs["SEM/proto_boost_abs_mean"] = proto_boost.abs().mean().item()
+
+            return logs
 
     def _flush_memory_logs(self, mem_log_buffer, global_step):
         if self.writer is None or len(mem_log_buffer) == 0:
@@ -614,6 +827,195 @@ class Runner:
 
         return pred, type_pred, error_pred
 
+    def _build_new_erm_inputs(
+        self,
+        pred,
+        no_drop_pred_raw,
+        no_drop_meta,
+        frame_features,
+        aux,
+        video_id,
+    ):
+        if aux is None:
+            raise RuntimeError("ERM v2 requires forward_with_aux outputs")
+
+        if "step_posteriors" not in aux:
+            raise RuntimeError("ERM v2 requires semantic aux: step_posteriors")
+
+        semantic_obs_seq = aux.get("semantic_obs_seq", None)
+        if semantic_obs_seq is None and ("step_sem_obs" in aux) and ("error_sem_obs" in aux):
+            semantic_obs_seq = 0.5 * (aux["step_sem_obs"] + aux["error_sem_obs"])
+
+        def _squeeze_or_none(x):
+            if x is None:
+                return None
+            return x.squeeze(0)
+
+        erm_inputs = {
+            "pred": pred,
+            "no_drop_pred": no_drop_pred_raw,
+            "no_drop_meta": no_drop_meta,
+            "frame_features": frame_features.squeeze(0).permute(1, 0),  # [T, D]
+            "vis_short_seq": _squeeze_or_none(aux.get("short_memory_seq", None)),
+            "sem_short_seq": _squeeze_or_none(aux.get("sem_short_seq", None)),
+            "semantic_obs_seq": _squeeze_or_none(semantic_obs_seq),
+            "step_posteriors": _squeeze_or_none(aux.get("step_posteriors", None)),
+            "coverage_trace_seq": _squeeze_or_none(aux.get("coverage_trace_seq", None)),
+            "uncertainty_trace_seq": _squeeze_or_none(aux.get("uncertainty_trace_seq", None)),
+            "graph": self.G.graph_info["graph"],
+            "video_id": video_id,
+        }
+        return erm_inputs
+
+    def _compute_erm_log_dict(self, erm_aux):
+        """
+        Compute scalar ERM-v2 diagnostics from SoftCandidateERM forward_with_aux() outputs.
+        """
+        if erm_aux is None:
+            return {}
+
+        logs = {}
+
+        with torch.no_grad():
+            candidate_count = torch.as_tensor(erm_aux["candidate_count_seq"]).float()   # [T]
+            err_mask = candidate_count > 0
+
+            if err_mask.sum().item() == 0:
+                return {}
+
+            candidate_weights = torch.as_tensor(erm_aux["candidate_weights_seq"]).float()   # [T, K]
+            candidate_flags = torch.as_tensor(erm_aux["candidate_flags_seq"]).long()        # [T, K]
+            anchor_fallback = torch.as_tensor(erm_aux["anchor_fallback_seq"]).float()       # [T]
+            q_component_norms = torch.as_tensor(erm_aux["q_component_norms"]).float()       # [T, 6]
+            joint_scores = torch.as_tensor(erm_aux["joint_scores_seq"]).float()             # [T, K, M]
+            aggregated_scores = torch.as_tensor(erm_aux["aggregated_scores_seq"]).float()
+            smoothed_scores = torch.as_tensor(erm_aux["smoothed_scores_seq"]).float()
+
+            # make sure both are [T, C]
+            if aggregated_scores.ndim == 2 and aggregated_scores.shape[0] != candidate_count.shape[0]:
+                aggregated_scores = aggregated_scores.transpose(0, 1)
+
+            if smoothed_scores.ndim == 2 and smoothed_scores.shape[0] != candidate_count.shape[0]:
+                smoothed_scores = smoothed_scores.transpose(0, 1)
+
+            valid_counts = candidate_count[err_mask]
+            logs["ERM/cand_size_mean"] = valid_counts.mean().item()
+            logs["ERM/cand_size_std"] = (
+                valid_counts.std(unbiased=False).item() if valid_counts.numel() > 1 else 0.0
+            )
+
+            anchor_mask = (candidate_flags & 1) > 0
+            semantic_mask = (candidate_flags & 2) > 0
+            topo_mask = (candidate_flags & 4) > 0
+
+            anchor_weight = (candidate_weights * anchor_mask.float()).sum(dim=-1)
+            logs["ERM/anchor_weight_mean"] = anchor_weight[err_mask].mean().item()
+
+            top1_idx = candidate_weights.argmax(dim=-1, keepdim=True)
+            anchor_is_top1 = anchor_mask.gather(dim=1, index=top1_idx).squeeze(1).float()
+            logs["ERM/anchor_is_top1_ratio"] = anchor_is_top1[err_mask].mean().item()
+
+            has_topo_neighbor = topo_mask.any(dim=-1).float()
+            logs["ERM/topo_neighbor_in_cand_ratio"] = has_topo_neighbor[err_mask].mean().item()
+
+            has_semantic_candidate = semantic_mask.any(dim=-1).float()
+            logs["ERM/semantic_candidate_present_ratio"] = has_semantic_candidate[err_mask].mean().item()
+
+            # candidate entropy over K
+            cand_entropy = -(
+                candidate_weights.clamp_min(1e-8) * candidate_weights.clamp_min(1e-8).log()
+            ).sum(dim=-1)
+            logs["ERM/cand_entropy_mean"] = cand_entropy[err_mask].mean().item()
+
+            logs["ERM/fallback_ratio"] = anchor_fallback[err_mask].mean().item()
+
+            # q_component_norms = [q_frame, q_vis, q_sem, q_obs, q_final, sem_conf]
+            logs["ERM/q_frame_contrib_norm"] = q_component_norms[err_mask, 0].mean().item()
+            logs["ERM/q_vis_contrib_norm"] = q_component_norms[err_mask, 1].mean().item()
+            logs["ERM/q_sem_contrib_norm"] = q_component_norms[err_mask, 2].mean().item()
+            logs["ERM/q_obs_contrib_norm"] = q_component_norms[err_mask, 3].mean().item()
+            logs["ERM/q_norm"] = q_component_norms[err_mask, 4].mean().item()
+            logs["ERM/sem_conf_mean"] = q_component_norms[err_mask, 5].mean().item()
+
+            logs["ERM/joint_score_mean"] = joint_scores[err_mask].mean().item()
+            logs["ERM/joint_score_std"] = joint_scores[err_mask].std(unbiased=False).item()
+
+            # use non-normal columns only
+            err_scores_before = aggregated_scores[err_mask, 1:]
+            err_scores_after = smoothed_scores[err_mask, 1:]
+
+            if err_scores_before.numel() > 0:
+                logs["ERM/agg_score_before_smooth_mean"] = err_scores_before.mean().item()
+                logs["ERM/agg_score_after_smooth_mean"] = err_scores_after.mean().item()
+
+                top2 = torch.topk(
+                    err_scores_after,
+                    k=min(2, err_scores_after.shape[-1]),
+                    dim=-1,
+                ).values
+                if top2.shape[-1] == 2:
+                    margin = top2[:, 0] - top2[:, 1]
+                else:
+                    margin = top2[:, 0]
+                logs["ERM/top1_top2_margin_mean"] = margin.mean().item()
+
+                pred_dist = torch.softmax(err_scores_after, dim=-1)
+                pred_entropy = -(
+                    pred_dist.clamp_min(1e-8) * pred_dist.clamp_min(1e-8).log()
+                ).sum(dim=-1)
+                logs["ERM/pred_error_type_entropy"] = pred_entropy.mean().item()
+
+                smooth_change = (err_scores_after - err_scores_before).abs().sum(dim=-1)
+                logs["ERM/smooth_change_ratio"] = (smooth_change > 1e-6).float().mean().item()
+
+        return logs
+
+
+    def _should_dump_debug(self, video_idx):
+        if not self.dump_debug_aux:
+            return False
+        if self.debug_dump_max_videos is not None and self.debug_dump_max_videos >= 0:
+            return video_idx < self.debug_dump_max_videos
+        return True
+
+    def _dump_model_debug_json(
+        self,
+        video_id,
+        aux,
+        pred,
+        no_drop_pred_raw,
+        label=None,
+        type_label=None,
+        drop_costs=None,
+        node_drop_costs=None,
+        no_drop_costs=None,
+        no_node_drop_costs=None,
+    ):
+        write_model_debug_json(
+            save_dir=self.save_dir,
+            video_id=video_id,
+            aux=aux,
+            pred=pred,
+            no_drop_pred_raw=no_drop_pred_raw,
+            label=label,
+            type_label=type_label,
+            drop_costs=drop_costs,
+            node_drop_costs=node_drop_costs,
+            no_drop_costs=no_drop_costs,
+            no_node_drop_costs=no_node_drop_costs,
+            dump_full_debug_tensors=self.dump_full_debug_tensors,
+        )
+
+    def _dump_erm_debug_json(self, video_id, erm_aux):
+        """
+        Save per-video ERM-v2 debug tensors for offline inspection.
+        """
+        if erm_aux is None:
+            return
+        if not self.use_new_erm:
+            return
+        write_erm_debug_json(self.save_dir, video_id, erm_aux)
+
     def train(self):
         global_step = 0
         best_score = 0.0
@@ -629,7 +1031,7 @@ class Runner:
                 label = label.squeeze(0).long().cpu()
                 type_label = type_label.squeeze(0).long().cpu()
 
-                if self.use_visual_memory:
+                if self.use_visual_memory or self.use_semantic_memory:
                     action_logits, frame_features, aux = self.model.forward_with_aux(feature.permute(0, 2, 1), label)
                     mem_log_buffer.append(self._compute_memory_log_dict(aux))
                 else:
@@ -670,7 +1072,7 @@ class Runner:
                     samples = []
                     global_step += 1
 
-                    if self.use_visual_memory:
+                    if self.use_visual_memory or self.use_semantic_memory:
                         self._flush_memory_logs(mem_log_buffer, global_step)
                         mem_log_buffer = []
 
@@ -715,13 +1117,20 @@ class Runner:
                 acc_list = []
                 tpr_list = []
                 fpr_list = []
+                erm_log_buffer = []
 
                 for video_idx, data in enumerate(loader):
                     v_feature, label, type_label, video = data
                     video = video[0]
                     feature = v_feature.to(self.device)
 
-                    action_logits, frame_features = self.model(feature.permute(0, 2, 1))
+                    if self.use_visual_memory or self.use_semantic_memory:
+                        action_logits, frame_features, aux = self.model.forward_with_aux(
+                            feature.permute(0, 2, 1)
+                        )
+                    else:
+                        action_logits, frame_features = self.model(feature.permute(0, 2, 1))
+                        aux = None
 
                     label = label.squeeze(0)
                     type_label = type_label.squeeze(0)
@@ -739,13 +1148,13 @@ class Runner:
                     sorted_node_ids = list(lexicographical_topological_sort(gmetadag))
                     idx2node = {idx: node_id for idx, node_id in enumerate(sorted_node_ids)}
 
-                    zx_costs, drop_costs, node_drop_costs = compute_generalized_metadag_costs(
+                    zx_costs_1, drop_costs_1, node_drop_costs_1 = compute_generalized_metadag_costs(
                         sample, idx2node, self.drop_base, self.node_drop_base
                     )
                     _, pred, type_pred = generalized_metadag2vid(
-                        zx_costs.cpu().numpy(),
-                        drop_costs.cpu().numpy(),
-                        node_drop_costs.cpu().numpy(),
+                        zx_costs_1.cpu().numpy(),
+                        drop_costs_1.cpu().numpy(),
+                        node_drop_costs_1.cpu().numpy(),
                         gmetadag,
                         idx2node,
                     )
@@ -753,24 +1162,60 @@ class Runner:
                     pred[pred >= self.num_classes] = self.bg_idx
 
                     # second round, no drop
-                    zx_costs, drop_costs, node_drop_costs = compute_generalized_metadag_costs(
+                    zx_costs_2, drop_costs_2, node_drop_costs_2 = compute_generalized_metadag_costs(
                         sample, idx2node, -100, -200
                     )
-                    _, no_drop_pred, _ = generalized_metadag2vid(
-                        zx_costs.cpu().numpy(),
-                        drop_costs.cpu().numpy(),
-                        node_drop_costs.cpu().numpy(),
+                    _, no_drop_pred_raw, _, no_drop_meta = generalized_metadag2vid(
+                        zx_costs_2.cpu().numpy(),
+                        drop_costs_2.cpu().numpy(),
+                        node_drop_costs_2.cpu().numpy(),
                         gmetadag,
                         idx2node,
+                        return_meta_labels=True,
                     )
 
+                    no_drop_pred = np.copy(no_drop_pred_raw)
                     no_drop_pred[no_drop_pred >= self.num_classes] = self.bg_idx
 
-                    pred, type_pred, error_pred = self.erm(
-                        pred,
-                        no_drop_pred,
-                        feature.permute(0, 2, 1).cpu().squeeze(0),
-                    )
+                    if self._should_dump_debug(video_idx):
+                        self._dump_model_debug_json(
+                            video_id=video,
+                            aux=aux,
+                            pred=pred,
+                            no_drop_pred_raw=no_drop_pred_raw,
+                            label=label,
+                            type_label=type_label,
+                            drop_costs=drop_costs_1,
+                            node_drop_costs=node_drop_costs_1,
+                            no_drop_costs=drop_costs_2,
+                            no_node_drop_costs=node_drop_costs_2,
+                        )
+
+                    if self.use_new_erm:
+                        erm_inputs = self._build_new_erm_inputs(
+                            pred=pred,
+                            no_drop_pred_raw=no_drop_pred_raw,
+                            no_drop_meta=no_drop_meta,
+                            frame_features=frame_features,
+                            aux=aux,
+                            video_id=video,
+                        )
+                        pred, type_pred, error_pred, erm_aux = self.erm_module.forward_with_aux(erm_inputs)
+                    else:
+                        pred, type_pred, error_pred = self.erm(
+                            pred,
+                            no_drop_pred,
+                            feature.permute(0, 2, 1).cpu().squeeze(0),
+                        )
+                        erm_aux = None
+
+                    if self.use_new_erm and erm_aux is not None:
+                        erm_log_dict = self._compute_erm_log_dict(erm_aux)
+                        if len(erm_log_dict) > 0:
+                            erm_log_buffer.append(erm_log_dict)
+
+                        if self._should_dump_debug(video_idx):
+                            self._dump_erm_debug_json(video, erm_aux)
 
                     # let error as an additional class
                     label_w_error_cls = label.clone()
@@ -886,6 +1331,13 @@ class Runner:
                     self.writer.add_scalar("ED_F1@0.500/valid", ed_out["F1@0.500"] * 100, global_step)
                     self.writer.add_scalar("AVG_ER_F1/valid", er_avg_f1, global_step)
                     self.writer.add_scalar("AVG_ED_F1/valid", ed_avg_f1, global_step)
+
+                    if self.use_new_erm and len(erm_log_buffer) > 0:
+                        keys = erm_log_buffer[0].keys()
+                        for k in keys:
+                            mean_v = float(np.mean([item[k] for item in erm_log_buffer]))
+                            self.writer.add_scalar(k, mean_v, global_step)
+
                     if self.is_vis:
                         grid = create_image_grid(os.path.join(self.save_dir, vis_dir))
                         self.writer.add_image("Images/valid", grid, global_step)

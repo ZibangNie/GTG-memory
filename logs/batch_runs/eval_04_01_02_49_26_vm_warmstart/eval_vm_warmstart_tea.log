@@ -1,0 +1,14 @@
+Loaded pretrained backbone from: ckpts/EgoPER/tea/best/best_checkpoint.pth
+Loaded trunk params: 100
+Loading Dataset ...
+  0%|          | 0/26 [00:00<?, ?it/s]100%|██████████| 26/26 [00:00<00:00, 372.26it/s]
+Loading Dataset ...
+  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 362.92it/s]
+Loading Dataset ...
+  0%|          | 0/35 [00:00<?, ?it/s]100%|██████████| 35/35 [00:00<00:00, 392.62it/s]
+Use visual memory: True
+Backbone LR: 5e-05, VM LR: 0.0001
+Ignore specific or non-exsting action type for error recognition: ['Normal']
+Load from epoch 2
+Num of valid omitted sequences: 32
+Evalutation Done...
