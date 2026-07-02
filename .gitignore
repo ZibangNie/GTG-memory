@@ -25,6 +25,9 @@ conda-meta/
 Thumbs.db
 
 # Logs
+logs/
+*.log
+events.out.tfevents.*
 
 
 # Temporary / cache
@@ -43,9 +46,11 @@ processed_data/
 # Models / weights
 weights/
 checkpoints/
+ckpts/
 
 pretrained/
 *.pt
+*.pth
 
 
 *.bin
@@ -61,6 +66,10 @@ pretrained/
 *.hdf5
 
 # Experiment outputs
+runs/
+exp_update/runs/
+exp_update/ckpts/
+exp_update/**/output/
 
 
 # Archives
@@ -85,14 +94,4 @@ secrets/
 *.pem
 *.jsonl.bak
 # GTG-memory data and weights
-
-
-
 /data/
-
-
-# ignore generated output dirs under exp_update
-exp_update/**/output/
-
-# ignore generated output dirs under exp_update
-exp_update/**/output/

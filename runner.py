@@ -23,6 +23,10 @@ from utils.semantic_prototype_loader import load_task_semantic_prototypes
 
 from datasets.gtg_dataset_loader import get_data_dict, VideoDataset
 
+from utils.debug_dump import (
+    dump_erm_debug_json as write_erm_debug_json,
+    dump_model_debug_json as write_model_debug_json,
+)
 from utils.metrics import Video, Checkpoint, omission_detection
 from utils.utils import draw_pred, create_image_grid
 
@@ -174,6 +178,7 @@ class Runner:
         self.is_vis = args.vis
         self.is_training = not args.eval
         self.dataset_name = dataset_name
+        self._configure_debug_dump(args, all_params)
 
         # visual-memory config
         self.use_visual_memory = all_params.get("use_visual_memory", False)
@@ -475,6 +480,17 @@ class Runner:
         if self.use_visual_memory or self.use_semantic_memory:
             print(f"Backbone LR: {self.backbone_lr}, VM LR: {self.vm_lr}")
         print("Ignore specific or non-exsting action type for error recognition:", self.ignore_actions)
+
+    def _configure_debug_dump(self, args, all_params):
+        cli_dump_debug = bool(getattr(args, "dump_debug", False))
+        cfg_dump_debug = bool(all_params.get("dump_debug_aux", False))
+        self.dump_debug_aux = cli_dump_debug or cfg_dump_debug
+
+        if cli_dump_debug:
+            self.debug_dump_max_videos = getattr(args, "debug_max_videos", -1)
+        else:
+            self.debug_dump_max_videos = all_params.get("debug_dump_max_videos", -1)
+        self.dump_full_debug_tensors = bool(all_params.get("dump_full_debug_tensors", False))
 
     def _load_pretrained_backbone_if_needed(self, ckpt_path):
         if ckpt_path is None or ckpt_path == "":
@@ -962,16 +978,6 @@ class Runner:
             return video_idx < self.debug_dump_max_videos
         return True
 
-    @staticmethod
-    def _to_serializable(x):
-        if x is None:
-            return None
-        if isinstance(x, torch.Tensor):
-            return x.detach().cpu().tolist()
-        if isinstance(x, np.ndarray):
-            return x.tolist()
-        return x
-
     def _dump_model_debug_json(
         self,
         video_id,
@@ -985,163 +991,20 @@ class Runner:
         no_drop_costs=None,
         no_node_drop_costs=None,
     ):
-        if aux is None:
-            return
-
-        out_dir = os.path.join(self.save_dir, "output", "model_debug")
-        os.makedirs(out_dir, exist_ok=True)
-
-        pred_np = np.asarray(pred)
-        no_drop_np = np.asarray(no_drop_pred_raw)
-
-        payload = {
-            "video_id": video_id,
-            "pred": pred_np.tolist(),
-            "pred_error_mask": (pred_np == -1).astype(int).tolist(),
-            "no_drop_pred_raw": no_drop_np.tolist(),
-            "gt_label": self._to_serializable(label),
-            "gt_type_label": self._to_serializable(type_label),
-            "first_pass_error_ratio": float((pred_np == -1).mean()),
-            "first_pass_unique_labels": sorted(np.unique(pred_np).tolist()),
-            "no_drop_unique_labels": sorted(np.unique(no_drop_np).tolist()),
-        }
-
-        if drop_costs is not None:
-            if isinstance(drop_costs, torch.Tensor):
-                drop_costs = drop_costs.detach().cpu().numpy()
-            payload["dp_drop_cost_t"] = np.asarray(drop_costs).tolist()
-            payload["dp_drop_cost_mean"] = float(np.mean(drop_costs))
-            payload["dp_drop_cost_min"] = float(np.min(drop_costs))
-            payload["dp_drop_cost_max"] = float(np.max(drop_costs))
-
-        if node_drop_costs is not None:
-            if isinstance(node_drop_costs, torch.Tensor):
-                node_drop_costs = node_drop_costs.detach().cpu().numpy()
-            payload["dp_node_drop_cost"] = np.asarray(node_drop_costs).tolist()
-            payload["dp_node_drop_cost_mean"] = float(np.mean(node_drop_costs))
-            payload["dp_node_drop_cost_min"] = float(np.min(node_drop_costs))
-            payload["dp_node_drop_cost_max"] = float(np.max(node_drop_costs))
-
-        if no_drop_costs is not None:
-            if isinstance(no_drop_costs, torch.Tensor):
-                no_drop_costs = no_drop_costs.detach().cpu().numpy()
-            payload["dp_no_drop_cost_t"] = np.asarray(no_drop_costs).tolist()
-
-        if no_node_drop_costs is not None:
-            if isinstance(no_node_drop_costs, torch.Tensor):
-                no_node_drop_costs = no_node_drop_costs.detach().cpu().numpy()
-            payload["dp_no_node_drop_cost"] = np.asarray(no_node_drop_costs).tolist()
-
-        if "step_posteriors" in aux and aux["step_posteriors"] is not None:
-            alpha = aux["step_posteriors"].detach().cpu().squeeze(0)
-            alpha_entropy_t = -(alpha.clamp_min(1e-8) * alpha.clamp_min(1e-8).log()).sum(dim=-1)
-            alpha_top1_t = alpha.max(dim=-1).values
-            payload["alpha_entropy_t"] = alpha_entropy_t.tolist()
-            payload["alpha_top1_t"] = alpha_top1_t.tolist()
-
-        if "error_posteriors" in aux and aux["error_posteriors"] is not None:
-            gamma = aux["error_posteriors"].detach().cpu().squeeze(0)
-            payload["error_mass_t"] = gamma.sum(dim=(-1, -2)).tolist()
-
-        if "candidate_mask" in aux and aux["candidate_mask"] is not None:
-            cand = aux["candidate_mask"].detach().cpu().squeeze(0)
-            payload["candidate_count_t"] = cand.float().sum(dim=-1).tolist()
-
-        if "sem_long_gate_seq" in aux and aux["sem_long_gate_seq"] is not None:
-            sem_long_gate = aux["sem_long_gate_seq"].detach().cpu().squeeze(0)
-            payload["sem_long_gate_mean_t"] = sem_long_gate.mean(dim=-1).tolist()
-
-        if "coverage_trace_seq" in aux and aux["coverage_trace_seq"] is not None:
-            coverage = aux["coverage_trace_seq"].detach().cpu().squeeze(0)
-            payload["coverage_mean_t"] = coverage.mean(dim=-1).tolist()
-            payload["coverage_peak_t"] = coverage.max(dim=-1).values.tolist()
-
-        if "uncertainty_trace_seq" in aux and aux["uncertainty_trace_seq"] is not None:
-            unc = aux["uncertainty_trace_seq"].detach().cpu().squeeze(0)
-            payload["uncertainty_norm_t"] = unc.norm(dim=-1).tolist()
-
-        if "semantic_fuse_gate_seq" in aux and aux["semantic_fuse_gate_seq"] is not None:
-            sfg = aux["semantic_fuse_gate_seq"].detach().cpu().squeeze(0)
-            payload["semantic_fuse_gate_mean_t"] = sfg.mean(dim=-1).tolist()
-
-        if "proto_gate" in aux and aux["proto_gate"] is not None:
-            pg = aux["proto_gate"].detach().cpu().squeeze(0)
-            payload["proto_gate_mean_t"] = pg.mean(dim=-1).tolist()
-
-        if self.dump_full_debug_tensors:
-            keep_keys = [
-                "raw_step_logits",
-                "step_posteriors",
-                "error_posteriors",
-                "candidate_mask",
-                "aux_stats_seq",
-                "sem_short_seq",
-                "sem_long_seq",
-                "sem_long_gate_seq",
-                "coverage_trace_seq",
-                "coverage_summary_seq",
-                "uncertainty_trace_seq",
-                "semantic_obs_seq",
-                "semantic_fuse_gate_seq",
-                "proto_gate",
-                "main_logits",
-                "final_logits",
-                "step_node_ids",
-                "extra_node_ids",
-            ]
-            for k in keep_keys:
-                if k in aux:
-                    payload[k] = self._to_serializable(aux[k])
-        else:
-            if "step_node_ids" in aux:
-                payload["step_node_ids"] = self._to_serializable(aux["step_node_ids"])
-            if "extra_node_ids" in aux:
-                payload["extra_node_ids"] = self._to_serializable(aux["extra_node_ids"])
-
-        if "main_logits" in aux and "final_logits" in aux:
-            main_logits = aux["main_logits"].detach().cpu().squeeze(0)
-            final_logits = aux["final_logits"].detach().cpu().squeeze(0)
-
-            main_probs = torch.softmax(main_logits, dim=0)
-            final_probs = torch.softmax(final_logits, dim=0)
-
-            main_entropy_t = -(
-                main_probs.clamp_min(1e-8) * main_probs.clamp_min(1e-8).log()
-            ).sum(dim=0)
-            final_entropy_t = -(
-                final_probs.clamp_min(1e-8) * final_probs.clamp_min(1e-8).log()
-            ).sum(dim=0)
-
-            payload["main_entropy_t"] = main_entropy_t.tolist()
-            payload["final_entropy_t"] = final_entropy_t.tolist()
-            payload["main_top1_prob_t"] = main_probs.max(dim=0).values.tolist()
-            payload["final_top1_prob_t"] = final_probs.max(dim=0).values.tolist()
-            payload["main_vs_final_logit_abs_mean_t"] = (
-                (final_logits - main_logits).abs().mean(dim=0).tolist()
-            )
-
-            step_node_ids = torch.as_tensor(aux.get("step_node_ids", []), dtype=torch.long)
-            extra_node_ids = torch.as_tensor(aux.get("extra_node_ids", []), dtype=torch.long)
-
-            if step_node_ids.numel() > 0:
-                payload["main_step_mean_t"] = main_logits.index_select(0, step_node_ids).mean(dim=0).tolist()
-                payload["final_step_mean_t"] = final_logits.index_select(0, step_node_ids).mean(dim=0).tolist()
-
-            if extra_node_ids.numel() > 0:
-                main_extra_mean_t = main_logits.index_select(0, extra_node_ids).mean(dim=0)
-                final_extra_mean_t = final_logits.index_select(0, extra_node_ids).mean(dim=0)
-
-                payload["main_extra_mean_t"] = main_extra_mean_t.tolist()
-                payload["final_extra_mean_t"] = final_extra_mean_t.tolist()
-
-                if step_node_ids.numel() > 0:
-                    main_step_mean_t = main_logits.index_select(0, step_node_ids).mean(dim=0)
-                    final_step_mean_t = final_logits.index_select(0, step_node_ids).mean(dim=0)
-                    payload["main_step_vs_extra_gap_t"] = (main_step_mean_t - main_extra_mean_t).tolist()
-                    payload["final_step_vs_extra_gap_t"] = (final_step_mean_t - final_extra_mean_t).tolist()
-
-        with open(os.path.join(out_dir, f"{video_id}.json"), "w") as fp:
-            json.dump(payload, fp)
+        write_model_debug_json(
+            save_dir=self.save_dir,
+            video_id=video_id,
+            aux=aux,
+            pred=pred,
+            no_drop_pred_raw=no_drop_pred_raw,
+            label=label,
+            type_label=type_label,
+            drop_costs=drop_costs,
+            node_drop_costs=node_drop_costs,
+            no_drop_costs=no_drop_costs,
+            no_node_drop_costs=no_node_drop_costs,
+            dump_full_debug_tensors=self.dump_full_debug_tensors,
+        )
 
     def _dump_erm_debug_json(self, video_id, erm_aux):
         """
@@ -1151,21 +1014,7 @@ class Runner:
             return
         if not self.use_new_erm:
             return
-
-        out_dir = os.path.join(self.save_dir, "output", "erm_debug")
-        os.makedirs(out_dir, exist_ok=True)
-
-        payload = {}
-        for k, v in erm_aux.items():
-            if isinstance(v, torch.Tensor):
-                payload[k] = v.detach().cpu().tolist()
-            elif isinstance(v, np.ndarray):
-                payload[k] = v.tolist()
-            else:
-                payload[k] = v
-
-        with open(os.path.join(out_dir, f"{video_id}.json"), "w") as fp:
-            json.dump(payload, fp)
+        write_erm_debug_json(self.save_dir, video_id, erm_aux)
 
     def train(self):
         global_step = 0
@@ -1328,6 +1177,20 @@ class Runner:
                     no_drop_pred = np.copy(no_drop_pred_raw)
                     no_drop_pred[no_drop_pred >= self.num_classes] = self.bg_idx
 
+                    if self._should_dump_debug(video_idx):
+                        self._dump_model_debug_json(
+                            video_id=video,
+                            aux=aux,
+                            pred=pred,
+                            no_drop_pred_raw=no_drop_pred_raw,
+                            label=label,
+                            type_label=type_label,
+                            drop_costs=drop_costs_1,
+                            node_drop_costs=node_drop_costs_1,
+                            no_drop_costs=drop_costs_2,
+                            no_node_drop_costs=node_drop_costs_2,
+                        )
+
                     if self.use_new_erm:
                         erm_inputs = self._build_new_erm_inputs(
                             pred=pred,
@@ -1351,8 +1214,7 @@ class Runner:
                         if len(erm_log_dict) > 0:
                             erm_log_buffer.append(erm_log_dict)
 
-                        # dump per-video debug only when vis is enabled
-                        if self.is_vis:
+                        if self._should_dump_debug(video_idx):
                             self._dump_erm_debug_json(video, erm_aux)
 
                     # let error as an additional class

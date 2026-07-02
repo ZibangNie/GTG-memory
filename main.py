@@ -33,7 +33,7 @@ parser.add_argument(
     help='Output directory name to save eval results to during eval, e.g. erm_v1_eval_tea_0404_run1'
 )
 
-# 新增
+# Debug dump options.
 parser.add_argument(
     '--dump_debug',
     action='store_true',
