@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="/root/autodl-tmp/GTG-memory"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIPELINE_TS="$(date +%Y%m%d_%H%M%S)"
 MASTER_LOG_DIR="${REPO_ROOT}/logs/batch_runs/pipeline_available_${PIPELINE_TS}"
 MASTER_LOG="${MASTER_LOG_DIR}/pipeline.log"
@@ -26,6 +26,8 @@ VM_LR="${VM_LR:-1e-4}"
 
 cd "${REPO_ROOT}"
 source env.sh
+DATA_ROOT="${GTG_EGOPER_DATA_ROOT:-${GTG_DATA}/EgoPER}"
+export GTG_EGOPER_DATA_ROOT="${DATA_ROOT}"
 
 # Stream the master log to the terminal and persist it to disk.
 exec > >(tee -a "${MASTER_LOG}") 2>&1
@@ -54,6 +56,7 @@ echo
 echo "[STEP 1/6] Build available-only splits + configs"
 python scripts/build_available_only_egoper_splits_and_configs.py \
   --repo_root "${REPO_ROOT}" \
+  --data_root "${DATA_ROOT}" \
   --num_epochs "${NUM_EPOCHS}" \
   --num_iterations "${NUM_ITERATIONS}" \
   --batch_size "${BATCH_SIZE}" \
@@ -70,6 +73,7 @@ python scripts/build_available_only_egoper_splits_and_configs.py \
   --vm_learning_rate "${VM_LR}"
 
 TASK_JSON="${REPO_ROOT}/reports/task_probe/egoper_available_only_latest.json"
+export TASK_JSON
 
 if [[ ! -f "${TASK_JSON}" ]]; then
   echo "[ERROR] missing task json: ${TASK_JSON}"
@@ -80,9 +84,10 @@ echo
 echo "[STEP 2/6] Load ready tasks from available-only report"
 python - <<'PY'
 import json
+import os
 from pathlib import Path
 
-task_json = Path("/root/autodl-tmp/GTG-memory/reports/task_probe/egoper_available_only_latest.json")
+task_json = Path(os.environ["TASK_JSON"])
 payload = json.loads(task_json.read_text(encoding="utf-8"))
 print("[READY TASKS]")
 for t in payload["ready_tasks"]:
@@ -91,9 +96,10 @@ PY
 
 READY_TASKS=$(python - <<'PY'
 import json
+import os
 from pathlib import Path
 
-task_json = Path("/root/autodl-tmp/GTG-memory/reports/task_probe/egoper_available_only_latest.json")
+task_json = Path(os.environ["TASK_JSON"])
 payload = json.loads(task_json.read_text(encoding="utf-8"))
 tasks = payload.get("ready_tasks", [])
 print(" ".join(tasks))
@@ -123,6 +129,8 @@ for task in ${READY_TASKS}; do
 
   python main.py \
     --config "${CFG}" \
+    --data-root "${DATA_ROOT}" \
+    --ckpt-root "${GTG_CKPT_ROOT}" \
     --dir baseline_retrain
 
   echo "[BASELINE][DONE] task=${task}"
@@ -132,7 +140,7 @@ echo
 echo "[STEP 4/6] Train visual-memory on available-only ready tasks"
 for task in ${READY_TASKS}; do
   CFG="configs/EgoPER/${task}/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json"
-  CKPT="ckpts/EgoPER/${task}/best/best_checkpoint.pth"
+  CKPT="${GTG_CKPT_ROOT}/EgoPER/${task}/best/best_checkpoint.pth"
 
   if [[ ! -f "${CFG}" ]]; then
     echo "[ERROR] missing visual-memory config: ${CFG}"
@@ -153,6 +161,8 @@ for task in ${READY_TASKS}; do
 
   python main.py \
     --config "${CFG}" \
+    --data-root "${DATA_ROOT}" \
+    --ckpt-root "${GTG_CKPT_ROOT}" \
     --dir vm_warmstart
 
   echo "[VM][DONE] task=${task}"
@@ -164,8 +174,8 @@ for task in ${READY_TASKS}; do
   BASE_CFG="configs/EgoPER/${task}/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json"
   VM_CFG="configs/EgoPER/${task}/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json"
 
-  BASE_DIR="$(ls -dt ckpts/EgoPER/${task}/baseline_retrain_* 2>/dev/null | head -n 1 || true)"
-  VM_DIR="$(ls -dt ckpts/EgoPER/${task}/vm_warmstart_* 2>/dev/null | head -n 1 || true)"
+  BASE_DIR="$(ls -dt "${GTG_CKPT_ROOT}/EgoPER/${task}/baseline_retrain_"* 2>/dev/null | head -n 1 || true)"
+  VM_DIR="$(ls -dt "${GTG_CKPT_ROOT}/EgoPER/${task}/vm_warmstart_"* 2>/dev/null | head -n 1 || true)"
 
   if [[ -z "${BASE_DIR}" ]]; then
     echo "[ERROR] no baseline run dir found for task=${task}"
@@ -188,6 +198,8 @@ for task in ${READY_TASKS}; do
 
   python main.py \
     --config "${BASE_CFG}" \
+    --data-root "${DATA_ROOT}" \
+    --ckpt-root "${GTG_CKPT_ROOT}" \
     --dir "${BASE_NAME}" \
     --eval
 
@@ -201,6 +213,8 @@ for task in ${READY_TASKS}; do
 
   python main.py \
     --config "${VM_CFG}" \
+    --data-root "${DATA_ROOT}" \
+    --ckpt-root "${GTG_CKPT_ROOT}" \
     --dir "${VM_NAME}" \
     --eval
 
@@ -211,6 +225,7 @@ echo
 echo "[STEP 6/6] Generate comparison report for available-only ready tasks"
 python scripts/compare_egoper_runs.py \
   --repo_root "${REPO_ROOT}" \
+  --ckpt_root "${GTG_CKPT_ROOT}" \
   --baseline_tag baseline_retrain \
   --vm_tag vm_warmstart \
   --task_list_json "${TASK_JSON}"

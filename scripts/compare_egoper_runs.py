@@ -5,84 +5,15 @@
 import argparse
 import csv
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
 
-from egoper_utils import ALL_EGOPER_TASKS, load_json
+from egoper_utils import ALL_EGOPER_TASKS, PROJECT_ROOT, load_json
+from experiment_metrics import METRIC_SPECS, parse_run_dir
 
-METRIC_SPECS = [
-    ("tas_f1_050", "TAS F1@0.500"),
-    ("tas_edit", "TAS Edit"),
-    ("tas_acc", "TAS Acc"),
-    ("ed_f1_050", "ED F1@0.500"),
-    ("omit_oiou", "Omission IoU"),
-    ("omit_oacc", "Omission Acc"),
-    ("er_wf1_000", "ER w-F1@0.000"),
-    ("er_wf1_050", "ER w-F1@0.500"),
-    ("er_eacc_000", "ER EAcc@0.000"),
-    ("er_eacc_050", "ER EAcc@0.500"),
-]
-
-def read_text(path: Path) -> str:
-    if not path.exists():
-        raise FileNotFoundError(f"Missing file: {path}")
-    return path.read_text(encoding="utf-8")
-
-def parse_first_float(pattern: str, text: str):
-    m = re.search(pattern, text, flags=re.MULTILINE)
-    return float(m.group(1)) if m else None
-
-def parse_table_value_pair(text: str, header_key: str):
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        if header_key in line:
-            for j in range(i + 1, min(i + 5, len(lines))):
-                candidate = lines[j].strip()
-                if candidate.startswith("|"):
-                    nums = re.findall(r"[-+]?\d+(?:\.\d+)?", candidate)
-                    if len(nums) >= 5:
-                        return float(nums[3]), float(nums[4])
-    return None, None
-
-def parse_action_seg(path: Path):
-    text = read_text(path)
-    return {
-        "tas_f1_050": parse_first_float(r"Avg F1@0\.500:\s*([0-9.]+)", text),
-        "tas_edit": parse_first_float(r"\|Edit:([0-9.]+)\|Acc:[0-9.]+\|", text),
-        "tas_acc": parse_first_float(r"\|Edit:[0-9.]+\|Acc:([0-9.]+)\|", text),
-    }
-
-def parse_error_detection(path: Path):
-    text = read_text(path)
-    return {
-        "ed_f1_050": parse_first_float(r"Avg F1@0\.500:\s*([0-9.]+)", text),
-        "omit_oiou": parse_first_float(r"\|oIoU:([0-9.]+)\|oAcc:[0-9.]+\|", text),
-        "omit_oacc": parse_first_float(r"\|oIoU:[0-9.]+\|oAcc:([0-9.]+)\|", text),
-    }
-
-def parse_error_recognition(path: Path):
-    text = read_text(path)
-    wf1_000, eacc_000 = parse_table_value_pair(text, "All w-F1@0.000")
-    wf1_050, eacc_050 = parse_table_value_pair(text, "All w-F1@0.500")
-    return {
-        "er_wf1_000": wf1_000,
-        "er_wf1_050": wf1_050,
-        "er_eacc_000": eacc_000,
-        "er_eacc_050": eacc_050,
-    }
-
-def parse_run_dir(run_dir: Path):
-    log_dir = run_dir / "log"
-    out = {}
-    out.update(parse_action_seg(log_dir / "action_segmentation.txt"))
-    out.update(parse_error_detection(log_dir / "error_detection.txt"))
-    out.update(parse_error_recognition(log_dir / "error_recognition.txt"))
-    return out
-
-def latest_run_dir(repo_root: Path, task: str, tag: str):
-    task_root = repo_root / "ckpts" / "EgoPER" / task
+def latest_run_dir(ckpt_root: Path, task: str, tag: str):
+    task_root = ckpt_root / "EgoPER" / task
     candidates = [p for p in task_root.glob(f"{tag}_*") if p.is_dir()]
     if not candidates:
         return None
@@ -133,6 +64,7 @@ def write_markdown(path: Path, rows, base_dirs, vm_dirs, summary, tasks):
     lines.append("# EgoPER Baseline vs Visual-Memory Comparison Report\n\n")
     lines.append(f"- Generated at: {summary['generated_at']}\n")
     lines.append(f"- Repo root: `{summary['repo_root']}`\n")
+    lines.append(f"- Checkpoint root: `{summary['ckpt_root']}`\n")
     lines.append(f"- Baseline tag: `{summary['baseline_tag']}`\n")
     lines.append(f"- Visual-memory tag: `{summary['vm_tag']}`\n")
     lines.append(f"- Tasks: `{tasks}`\n\n")
@@ -175,7 +107,8 @@ def write_markdown(path: Path, rows, base_dirs, vm_dirs, summary, tasks):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_root", type=str, default="/root/autodl-tmp/GTG-memory")
+    parser.add_argument("--repo_root", type=str, default=str(PROJECT_ROOT))
+    parser.add_argument("--ckpt_root", type=str, default="")
     parser.add_argument("--baseline_tag", type=str, default="baseline_retrain")
     parser.add_argument("--vm_tag", type=str, default="vm_warmstart")
     parser.add_argument("--task_list_json", type=str, default="")
@@ -183,6 +116,7 @@ def main():
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root)
+    ckpt_root = Path(args.ckpt_root) if args.ckpt_root else repo_root / "ckpts"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if args.task_list_json:
@@ -201,8 +135,8 @@ def main():
     vm_dirs = {}
 
     for task in tasks:
-        base_dir = latest_run_dir(repo_root, task, args.baseline_tag)
-        vm_dir = latest_run_dir(repo_root, task, args.vm_tag)
+        base_dir = latest_run_dir(ckpt_root, task, args.baseline_tag)
+        vm_dir = latest_run_dir(ckpt_root, task, args.vm_tag)
 
         base_dirs[task] = str(base_dir) if base_dir else "-"
         vm_dirs[task] = str(vm_dir) if vm_dir else "-"
@@ -224,6 +158,7 @@ def main():
     summary = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "repo_root": str(repo_root),
+        "ckpt_root": str(ckpt_root),
         "baseline_tag": args.baseline_tag,
         "vm_tag": args.vm_tag,
         "tasks": tasks,

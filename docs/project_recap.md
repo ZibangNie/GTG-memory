@@ -95,20 +95,29 @@ The semantic-memory prototype is implemented and has training/evaluation artifac
 
 The soft ERM v1 is implemented but should be treated as an unsuccessful or unfinished experiment. On the available logs it often hurts ED/ER, so it should not be presented as a completed improvement.
 
+The repository now has a portable runtime-config layer, a code-only readiness
+check, fixed-provenance experiment manifests, and canonical generated reports.
+The core memory smoke test passes. Full local train/eval still requires the
+processed datasets and is therefore not yet verified on this Windows machine.
+
 ## Main technical debt
 
 - The previous branch contained committed merge-conflict markers in several scripts; these have been resolved in the cleanup branch.
-- The README was still mostly the upstream GTG README.
+- The README now describes this fork, its runtime boundary, and its verified results.
 - EgoPER script utilities are now centralized in `scripts/egoper_utils.py`.
-- Several scripts and configs hard-code `/root/autodl-tmp/...`, so the project is AutoDL/Linux-oriented.
-- Many checkpoints, TensorBoard events, logs, and generated outputs are present in the working tree/history.
-- `notes/semantic_memory_impl.md` is empty and should either be filled or removed later.
-- Existing reports do not yet form a single final paper-style experiment table covering baseline, visual memory, semantic memory, and ERM.
+- Historical JSON configs still record `/root/autodl-tmp/...`; runtime overrides
+  now avoid editing them in place.
+- Historical checkpoints and generated outputs remain in Git history. The current
+  tree keeps selected source logs and canonical reports instead.
+- `runner.py` remains monolithic and is the next significant refactor target.
+- The canonical report covers baseline, visual memory, semantic memory, and the
+  tea-only ERM experiment, but still lacks multi-seed statistics.
 
 ## Recommended continuation
 
-1. Keep the current code changes as a cleanup branch.
-2. Do not delete existing experiment artifacts until the useful metrics have been extracted.
-3. Produce one canonical report with baseline, visual-memory, semantic-memory, and semantic+ERM rows.
-4. Decide whether the research story is mainly visual-memory improving GTG2Vid logits, or semantic/ERM improving error-type recognition.
-5. If continuing the research, redesign ERM after fixing the reproducibility story.
+1. Keep the fixed manifest and selected source logs as the experiment evidence boundary.
+2. Publish any checkpoints worth retaining through dedicated artifact storage.
+3. Re-run at least one real task end to end after the processed data is restored.
+4. Add multi-seed experiments before making paper-level performance claims.
+5. If continuing the research, redesign the memory write/read mechanism or ERM
+   around one narrow algorithmic contribution.

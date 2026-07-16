@@ -15,6 +15,9 @@ if str(REPO_ROOT) not in sys.path:
 from datasets.gtg_dataset_loader import get_data_dict
 from egoper_utils import (
     ALL_EGOPER_TASKS,
+    PROJECT_ROOT,
+    add_egoper_data_root_arg,
+    apply_data_root_override,
     dump_json,
     find_base_config,
     load_json,
@@ -65,7 +68,8 @@ def check_split(cfg, split_key: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_root", type=str, default="/root/autodl-tmp/GTG-memory")
+    parser.add_argument("--repo_root", type=str, default=str(PROJECT_ROOT))
+    add_egoper_data_root_arg(parser)
     args = parser.parse_args()
 
     repo_root = Path(args.repo_root)
@@ -94,7 +98,7 @@ def main():
             print(f"[SKIP] {task}: no base config")
             continue
 
-        cfg = load_json(base_cfg)
+        cfg = apply_data_root_override(load_json(base_cfg), args.data_root)
         split_checks = {}
         ok_all = True
 

@@ -1,7 +1,7 @@
 # Build EgoPER available-only splits and matching configs.
 #
 # Outputs:
-# - /root/autodl-tmp/data/EgoPER/<task>/{training,validation,test}_available_only.txt
+# - <data_root>/<task>/{training,validation,test}_available_only.txt
 # - configs/EgoPER/<task>/generated_available_only/
 # - reports/task_probe/egoper_available_only_latest.json
 import argparse
@@ -17,7 +17,10 @@ if str(REPO_ROOT) not in sys.path:
 from datasets.gtg_dataset_loader import get_data_dict
 from egoper_utils import (
     ALL_EGOPER_TASKS,
+    PROJECT_ROOT,
+    add_egoper_data_root_arg,
     add_training_config_args,
+    apply_data_root_override,
     baseline_config,
     dump_json,
     dump_lines,
@@ -104,7 +107,8 @@ def build_available_split(cfg, split_key: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_root", type=str, default="/root/autodl-tmp/GTG-memory")
+    parser.add_argument("--repo_root", type=str, default=str(PROJECT_ROOT))
+    add_egoper_data_root_arg(parser)
     add_training_config_args(parser)
     args = parser.parse_args()
 
@@ -134,7 +138,7 @@ def main():
             print(f"[SKIP] {task}: no base config")
             continue
 
-        cfg = load_json(src_cfg)
+        cfg = apply_data_root_override(load_json(src_cfg), args.data_root)
         train_info = build_available_split(cfg, "train_split")
         val_info = build_available_split(cfg, "val_split")
         test_info = build_available_split(cfg, "test_split")

@@ -2,7 +2,6 @@ import copy
 import json
 import torch
 import numpy as np
-import Levenshtein
 # from actseg_src.eval import IoU
 from collections import defaultdict
 import math

@@ -20,6 +20,7 @@ from networkx.algorithms.dag import lexicographical_topological_sort
 
 from models.models import ASDiffusionBackbone
 from utils.semantic_prototype_loader import load_task_semantic_prototypes
+from utils.runtime_config import load_runtime_config
 
 from datasets.gtg_dataset_loader import get_data_dict, VideoDataset
 
@@ -54,12 +55,12 @@ def mode_filter(x, window_size=30):
     return filtered
 
 
-def create_log_folder(dirname, naming, dataset_name, ckpt_dir):
+def create_log_folder(dirname, naming, dataset_name, ckpt_dir, runs_dir):
     now = datetime.now()
     current_time = now.strftime("%m_%d_%H_%M_%S")
 
     ckpt_dataset_dir = os.path.join(ckpt_dir, naming, dataset_name)
-    runs_dataset_dir = os.path.join("runs", naming, dataset_name)
+    runs_dataset_dir = os.path.join(runs_dir, naming, dataset_name)
 
     # Always ensure parent directories exist first.
     os.makedirs(ckpt_dataset_dir, exist_ok=True)
@@ -156,7 +157,11 @@ def get_datasets(all_params, num_classes, action2idx, actiontype2idx, is_eval):
 
 class Runner:
     def __init__(self, args):
-        all_params = json.load(open(args.config))
+        all_params = load_runtime_config(
+            args.config,
+            data_root=getattr(args, "data_root", None),
+            ckpt_root=getattr(args, "ckpt_root", None),
+        )
         root_data_dir = all_params["root_data_dir"]
         dataset_name = all_params["dataset_name"]
         input_dim = all_params["input_dim"]
@@ -174,6 +179,7 @@ class Runner:
         self.batch_size = all_params["batch_size"]
         self.num_iterations = all_params["num_iterations"]
         self.ckpt_dir = all_params["ckpt_dir"]
+        self.runs_dir = all_params["runs_dir"]
         self.drop_base = all_params["drop_base"]
         self.is_vis = args.vis
         self.is_training = not args.eval
@@ -405,7 +411,13 @@ class Runner:
             self.test_loader = torch.utils.data.DataLoader(dataset_dict["test"], batch_size=1, shuffle=False, num_workers=1)
             self.val_loader = torch.utils.data.DataLoader(dataset_dict["val"], batch_size=1, shuffle=False, num_workers=1)
             self.train_loader = torch.utils.data.DataLoader(dataset_dict["train"], batch_size=1, shuffle=True, num_workers=1)
-            self.save_dir, self.writer = create_log_folder(args.dir, self.naming, dataset_name, self.ckpt_dir)
+            self.save_dir, self.writer = create_log_folder(
+                args.dir,
+                self.naming,
+                dataset_name,
+                self.ckpt_dir,
+                self.runs_dir,
+            )
 
         self.G = dataset_dict["train"].G
 

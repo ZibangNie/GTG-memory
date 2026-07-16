@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "dataset": "EgoPER",
+  "snapshot_date": "2026-04-05",
+  "tasks": ["tea", "oatmeal", "pinwheels", "quesadilla", "coffee"],
+  "variants": {
+    "baseline": {
+      "label": "Baseline",
+      "scope": "five_task",
+      "runs": {
+        "tea": {
+          "run_id": "baseline_retrain_04_01_17_04_37",
+          "config": "configs/EgoPER/tea/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json",
+          "log_dir": "reports/source_logs/EgoPER/baseline/tea"
+        },
+        "oatmeal": {
+          "run_id": "baseline_retrain_04_01_17_16_36",
+          "config": "configs/EgoPER/oatmeal/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json",
+          "log_dir": "reports/source_logs/EgoPER/baseline/oatmeal"
+        },
+        "pinwheels": {
+          "run_id": "baseline_retrain_04_01_17_39_09",
+          "config": "configs/EgoPER/pinwheels/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json",
+          "log_dir": "reports/source_logs/EgoPER/baseline/pinwheels"
+        },
+        "quesadilla": {
+          "run_id": "baseline_retrain_04_01_17_55_56",
+          "config": "configs/EgoPER/quesadilla/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json",
+          "log_dir": "reports/source_logs/EgoPER/baseline/quesadilla"
+        },
+        "coffee": {
+          "run_id": "baseline_retrain_04_01_18_01_54",
+          "config": "configs/EgoPER/coffee/generated_available_only/vc_4omini_post_db0.6.available_only.baseline.train.json",
+          "log_dir": "reports/source_logs/EgoPER/baseline/coffee"
+        }
+      }
+    },
+    "visual_memory": {
+      "label": "Visual memory",
+      "scope": "five_task",
+      "runs": {
+        "tea": {
+          "run_id": "vm_warmstart_04_02_07_33_44",
+          "config": "configs/EgoPER/tea/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json",
+          "log_dir": "reports/source_logs/EgoPER/visual_memory/tea"
+        },
+        "oatmeal": {
+          "run_id": "vm_warmstart_04_02_08_14_50",
+          "config": "configs/EgoPER/oatmeal/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json",
+          "log_dir": "reports/source_logs/EgoPER/visual_memory/oatmeal"
+        },
+        "pinwheels": {
+          "run_id": "vm_warmstart_04_02_09_28_25",
+          "config": "configs/EgoPER/pinwheels/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json",
+          "log_dir": "reports/source_logs/EgoPER/visual_memory/pinwheels"
+        },
+        "quesadilla": {
+          "run_id": "vm_warmstart_04_02_10_38_26",
+          "config": "configs/EgoPER/quesadilla/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json",
+          "log_dir": "reports/source_logs/EgoPER/visual_memory/quesadilla"
+        },
+        "coffee": {
+          "run_id": "vm_warmstart_04_02_11_02_30",
+          "config": "configs/EgoPER/coffee/generated_available_only/vc_4omini_post_db0.6.available_only.visual_memory.train.json",
+          "log_dir": "reports/source_logs/EgoPER/visual_memory/coffee"
+        }
+      }
+    },
+    "semantic_memory": {
+      "label": "Semantic memory",
+      "scope": "five_task",
+      "runs": {
+        "tea": {
+          "run_id": "sem_v1_avail_train5_tea_04_04_03_53_35",
+          "config": "configs/EgoPER/tea/generated_available_only/vc_4omini_post_db0.6.available_only.semantic_memory.train5.json",
+          "log_dir": "reports/source_logs/EgoPER/semantic_memory/tea"
+        },
+        "oatmeal": {
+          "run_id": "sem_v1_avail_train5_oatmeal_04_04_05_27_31",
+          "config": "configs/EgoPER/oatmeal/generated_available_only/vc_4omini_post_db0.6.available_only.semantic_memory.train5.json",
+          "log_dir": "reports/source_logs/EgoPER/semantic_memory/oatmeal"
+        },
+        "pinwheels": {
+          "run_id": "sem_v1_avail_train5_pinwheels_04_04_08_20_35",
+          "config": "configs/EgoPER/pinwheels/generated_available_only/vc_4omini_post_db0.6.available_only.semantic_memory.train5.json",
+          "log_dir": "reports/source_logs/EgoPER/semantic_memory/pinwheels"
+        },
+        "quesadilla": {
+          "run_id": "sem_v1_avail_train5_quesadilla_04_04_11_36_33",
+          "config": "configs/EgoPER/quesadilla/generated_available_only/vc_4omini_post_db0.6.available_only.semantic_memory.train5.json",
+          "log_dir": "reports/source_logs/EgoPER/semantic_memory/quesadilla"
+        },
+        "coffee": {
+          "run_id": "sem_v1_avail_train5_coffee_04_04_12_21_08",
+          "config": "configs/EgoPER/coffee/generated_available_only/vc_4omini_post_db0.6.available_only.semantic_memory.train5.json",
+          "log_dir": "reports/source_logs/EgoPER/semantic_memory/coffee"
+        }
+      }
+    },
+    "soft_erm_v1": {
+      "label": "Soft ERM v1",
+      "scope": "tea_only",
+      "runs": {
+        "tea": {
+          "run_id": "tea_availonly_ermv1_eval_0405_015142",
+          "config": "configs/EgoPER/tea/generated_available_only/vc_4omini_post_db0.6.available_only.visual_semantic_memory.erm_v1.eval.json",
+          "log_dir": "reports/source_logs/EgoPER/soft_erm_v1/tea"
+        }
+      }
+    }
+  },
+  "limitations": [
+    "The preserved run directories did not contain embedded config snapshots; config paths were reconstructed from experiment naming and scripts.",
+    "The table contains one selected run per task and variant, so it does not provide multi-seed variance or significance testing.",
+    "Soft ERM v1 has only a tea evaluation and must not be averaged or compared as a five-task result."
+  ]
+}

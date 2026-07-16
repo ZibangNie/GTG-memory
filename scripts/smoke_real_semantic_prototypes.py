@@ -1,3 +1,5 @@
+import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -12,10 +14,20 @@ from utils.semantic_prototype_loader import load_task_semantic_prototypes
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--data-root",
+        default=os.environ.get("GTG_EGOPER_DATA_ROOT") or os.environ.get("GTG_DATA_ROOT"),
+        help="Path containing EgoPER mapping files and task directories.",
+    )
+    args = parser.parse_args()
+    if not args.data_root:
+        raise SystemExit("Pass --data-root or set GTG_EGOPER_DATA_ROOT.")
+
     torch.manual_seed(7)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    root_data_dir = "/root/autodl-tmp/data/EgoPER"
+    root_data_dir = args.data_root
     dataset_name = "tea"
     feature_dim = 256
 

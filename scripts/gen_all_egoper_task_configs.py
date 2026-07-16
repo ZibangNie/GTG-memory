@@ -4,19 +4,23 @@ import argparse
 from pathlib import Path
 
 from egoper_utils import (
+    add_egoper_data_root_arg,
     add_training_config_args,
+    apply_data_root_override,
     baseline_config,
     dump_json,
     find_base_config,
     load_json,
+    PROJECT_ROOT,
     visual_memory_config,
 )
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_root", type=str, default="/root/autodl-tmp/GTG-memory")
+    parser.add_argument("--repo_root", type=str, default=str(PROJECT_ROOT))
     parser.add_argument("--task_list_json", type=str, required=True)
+    add_egoper_data_root_arg(parser)
     add_training_config_args(parser)
     args = parser.parse_args()
 
@@ -33,7 +37,7 @@ def main():
             continue
 
         print(f"[FOUND] task={task} -> {src_cfg_path.name}")
-        cfg = load_json(src_cfg_path)
+        cfg = apply_data_root_override(load_json(src_cfg_path), args.data_root)
         generated_dir = task_dir / "generated"
 
         baseline_out = generated_dir / "vc_4omini_post_db0.6.baseline.train.json"

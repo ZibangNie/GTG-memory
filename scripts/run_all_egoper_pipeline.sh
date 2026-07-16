@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="/root/autodl-tmp/GTG-memory"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIPELINE_TS="$(date +%Y%m%d_%H%M%S)"
 MASTER_LOG_DIR="${REPO_ROOT}/logs/batch_runs/pipeline_${PIPELINE_TS}"
 MASTER_LOG="${MASTER_LOG_DIR}/pipeline.log"
@@ -28,6 +28,8 @@ VM_LR="${VM_LR:-1e-4}"
 
 cd "${REPO_ROOT}"
 source env.sh
+DATA_ROOT="${GTG_EGOPER_DATA_ROOT:-${GTG_DATA}/EgoPER}"
+export GTG_EGOPER_DATA_ROOT="${DATA_ROOT}"
 
 exec > >(tee -a "${MASTER_LOG}") 2>&1
 
@@ -41,9 +43,22 @@ echo "LOG_FREQ=${LOG_FREQ}"
 echo "========================================"
 
 echo
+if [[ -z "${TASK_JSON:-}" ]]; then
+  python scripts/probe_available_egoper_tasks.py \
+    --repo_root "${REPO_ROOT}" \
+    --data_root "${DATA_ROOT}"
+  TASK_JSON="${REPO_ROOT}/reports/task_probe/egoper_ready_tasks_latest.json"
+fi
+if [[ ! -f "${TASK_JSON}" ]]; then
+  echo "[ERROR] missing task list: ${TASK_JSON}"
+  exit 1
+fi
+
 echo "[STEP 1/5] Generate all configs"
 python scripts/gen_all_egoper_task_configs.py \
   --repo_root "${REPO_ROOT}" \
+  --data_root "${DATA_ROOT}" \
+  --task_list_json "${TASK_JSON}" \
   --num_epochs "${NUM_EPOCHS}" \
   --num_iterations "${NUM_ITERATIONS}" \
   --batch_size "${BATCH_SIZE}" \
@@ -80,6 +95,7 @@ echo
 echo "[FINAL] Generate comparison report"
 python scripts/compare_egoper_runs.py \
   --repo_root "${REPO_ROOT}" \
+  --ckpt_root "${GTG_CKPT_ROOT}" \
   --baseline_tag baseline_retrain \
   --vm_tag vm_warmstart
 

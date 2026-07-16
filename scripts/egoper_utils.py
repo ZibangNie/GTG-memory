@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable
 
 
 ALL_EGOPER_TASKS = ["tea", "oatmeal", "pinwheels", "quesadilla", "coffee"]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_json(path: Path | str) -> Any:
@@ -68,6 +70,7 @@ def add_training_config_args(parser) -> None:
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--background_weight", type=float, default=2.0)
+    parser.add_argument("--drop_base", type=float, default=None)
     parser.add_argument("--short_dim", type=int, default=256)
     parser.add_argument("--long_dim", type=int, default=384)
     parser.add_argument("--fusion_dim", type=int, default=256)
@@ -75,6 +78,22 @@ def add_training_config_args(parser) -> None:
     parser.add_argument("--fusion_dropout", type=float, default=0.1)
     parser.add_argument("--backbone_learning_rate", type=float, default=5e-5)
     parser.add_argument("--vm_learning_rate", type=float, default=1e-4)
+
+
+def add_egoper_data_root_arg(parser) -> None:
+    parser.add_argument(
+        "--data_root",
+        type=str,
+        default=os.environ.get("GTG_EGOPER_DATA_ROOT") or os.environ.get("GTG_DATA_ROOT"),
+        help="Override root_data_dir in source and generated EgoPER configs.",
+    )
+
+
+def apply_data_root_override(cfg: dict[str, Any], data_root: str | None) -> dict[str, Any]:
+    out = dict(cfg)
+    if data_root:
+        out["root_data_dir"] = str(Path(data_root).expanduser())
+    return out
 
 
 def apply_common_training_overrides(cfg: dict[str, Any], args) -> dict[str, Any]:
@@ -86,6 +105,8 @@ def apply_common_training_overrides(cfg: dict[str, Any], args) -> dict[str, Any]
     out["log_freq"] = args.log_freq
     out["num_iterations"] = args.num_iterations
     out["background_weight"] = args.background_weight
+    if args.drop_base is not None:
+        out["drop_base"] = args.drop_base
     return out
 
 

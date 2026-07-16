@@ -2,14 +2,26 @@
 
 ## Sources
 
-The current reliable experiment evidence comes from generated logs and reports already present in the repository:
+The canonical results are generated from fixed run IDs and preserved source logs:
+
+- `reports/experiments/egoper_runs.json`
+- `reports/source_logs/EgoPER/`
+- `reports/experiments/canonical/egoper_results.md`
+
+Older generated reports are retained as supporting provenance:
 
 - `reports/compare_runs/20260403_023208/comparison_report.md`
 - `reports/compare_runs/20260403_023208/comparison_summary.csv`
-- `ckpts/EgoPER/*/sem_v1_avail_train5_*/log/*.txt`
-- `ckpts/EgoPER/tea/tea_ermv1_0405_011412/log/*.txt`
-- `ckpts/EgoPER/tea/tea_availonly_ermv1_eval_0405_015142/log/*.txt`
-- `exp_update/ckpts/EgoPER/coffee/*/log/*.txt`
+
+The original `ckpts/` and `exp_update/ckpts/` directories may still exist in a
+developer's local workspace, but they are no longer required to rebuild the
+canonical table and are not intended for version control.
+
+Regenerate the canonical report with:
+
+```bash
+python scripts/build_experiment_report.py
+```
 
 ## Metric meanings
 
@@ -59,3 +71,12 @@ The cleanest defensible result is:
 > Visual memory slightly improves GTG2Vid action segmentation and omission IoU, but the current semantic-memory and ERM variants do not yet provide a stable overall gain for error recognition.
 
 The project should not claim that the full memory + ERM stack is solved. It should present visual memory as the strongest completed prototype and semantic/ERM as follow-up work or failed/partial ablations.
+
+## Reproducibility boundary
+
+- Each five-task row currently contains one selected run per task.
+- Multi-seed mean, variance, and significance tests are not available.
+- Historical run folders did not embed config snapshots; manifest config paths
+  were reconstructed from experiment naming and scripts.
+- Soft ERM v1 is a tea-only partial experiment and is not included in five-task
+  averages.

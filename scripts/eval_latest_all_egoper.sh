@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 RUN_TAG="$1"
-REPO_ROOT="/root/autodl-tmp/GTG-memory"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TASKS=("tea" "oatmeal" "pinwheels" "quesadilla" "coffee")
 RUN_TS="$(date +%m_%d_%H_%M_%S)"
 BATCH_LOG_DIR="${REPO_ROOT}/logs/batch_runs/eval_${RUN_TS}_${RUN_TAG}"
@@ -16,6 +16,7 @@ mkdir -p "${BATCH_LOG_DIR}"
 
 cd "${REPO_ROOT}"
 source env.sh
+DATA_ROOT="${GTG_EGOPER_DATA_ROOT:-${GTG_DATA}/EgoPER}"
 
 for task in "${TASKS[@]}"; do
   if [[ "${RUN_TAG}" == "baseline_retrain" ]]; then
@@ -32,7 +33,7 @@ for task in "${TASKS[@]}"; do
     continue
   fi
 
-  LATEST_DIR="$(ls -dt ckpts/EgoPER/${task}/${RUN_TAG}_* 2>/dev/null | head -n 1 || true)"
+  LATEST_DIR="$(ls -dt "${GTG_CKPT_ROOT}/EgoPER/${task}/${RUN_TAG}_"* 2>/dev/null | head -n 1 || true)"
   if [[ -z "${LATEST_DIR}" ]]; then
     echo "[SKIP] no run dir found for task=${task}, tag=${RUN_TAG}"
     continue
@@ -48,6 +49,8 @@ for task in "${TASKS[@]}"; do
 
   python main.py \
     --config "${CFG}" \
+    --data-root "${DATA_ROOT}" \
+    --ckpt-root "${GTG_CKPT_ROOT}" \
     --dir "${LATEST_BASENAME}" \
     --eval \
     2>&1 | tee "${BATCH_LOG_DIR}/eval_${RUN_TAG}_${task}.log"
